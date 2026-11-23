@@ -78,17 +78,34 @@ def _definition_for(task_id: str) -> dict | None:
 
 # ---------------------------------------------------------------- 各项判定
 
-def has_effective_conclusion(report: str, artifacts: list[str]) -> tuple[bool, str]:
-    """"有效结论"= 有可复跑数字 + 复跑方法。
+def has_effective_conclusion(report: str, artifacts: list[str],
+                             kind: str = "kernel") -> tuple[bool, str]:
+    """“有效结论”= 有可复跑数字 + 复跑方法。
 
     判法刻意保守：要么给出命令（可复跑方法），要么给出落盘的原始输出 +
-    数字。两者都没有的一律不算——我们被"写了一堆但没有数"坑过。
+    数字。两者都没有的一律不算——我们被“写了一堆但没有数”坑过。
+
+    judgment 类（L3/L5）另按一套：正确答案是“通不通”，本来就没有性能数字。
+    对它要求“有数字”会把每道 L5 都判成无效，Δ_eff 恒为 0——那测的是
+    题型的口味，不是能力。所以判定题的判据是“有结论 + 有可复跑证据”。
     """
     if not report.strip():
         return False, "没有 report.md"
+    if kind == "judgment":
+        has_cmd = bool(re.search(r"(python3?\s|bash\s|sh\s+-c|命令[:：]|复跑)", report))
+        has_raw = any(p.startswith("results/") for p in artifacts)
+        if has_cmd and has_raw:
+            return True, "有结论 + 复跑命令 + 原始输出"
+        if has_cmd:
+            return True, "有结论 + 复跑命令"
+        return False, "没有复跑方法（命令或原始输出）"
     has_cmd = bool(re.search(r"(python3?\s|bash\s|sh\s+-c|命令[:：])", report))
-    has_num = bool(re.search(r"\d+(?:\.\d+)?\s*(?:ms|us|µs|TFLOPS|GB/s|x|×|%)", report,
-                             re.I))
+    # 数字必须自成一体：左边界不能是字母数字或点（否则 python3 x.py 里的
+    # "3 x" 会被当成 3 倍加速），右边界不能紧跟字母（排除 16MB 里的 16）。
+    has_num = bool(
+        re.search(r"(?<![\w.])-?\d+(?:\.\d+)?\s*(?:ms|us|µs|ns|s|TFLOPS|TF|GB/s|%|x|×)(?![\w.])",
+                  report, re.I)
+    )
     has_raw = any(p.startswith("results/") for p in artifacts)
     if has_cmd and (has_num or has_raw):
         return True, "有命令 + 数字/原始输出"
@@ -169,7 +186,10 @@ def collect(runs_dir: str) -> dict:
                 if os.path.isfile(os.path.join(d, name)) and name not in artifacts:
                     artifacts.append(name)
 
-            eff, eff_why = has_effective_conclusion(report, artifacts)
+            defn = _definition_for(task_id) or {}
+            eff, eff_why = has_effective_conclusion(
+                report, artifacts, kind=defn.get("kind", "kernel")
+            )
             js = judged_score(task_id, d)
             hrate, hdetail = hallucination_rate(task_id, d)
             leaks = leak_hits(d)
