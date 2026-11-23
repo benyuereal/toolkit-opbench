@@ -130,21 +130,52 @@ def judged_score(task_id: str, attempt_dir: str) -> tuple[int, str] | None:
     return judgment.score(report, evidence, defn)
 
 
-def _evidence_from(attempt_dir: str, report: str) -> list[str]:
-    """证据 = 报告里带标记的段落 + results/ 下原始输出的前若干行。
+# 证据片段的识别：只认"可核对的具体东西"，不认散文行。
+# 之前把 report 的每一行都当证据，A 臂的报告被数成 216 条——那种计数
+# 只会让"证据充分"变成"话说得多"。
+_EVIDENCE_PATTERNS = (
+    re.compile(r"^\s*```"),                      # 代码块
+    re.compile(r"(RuntimeError|ValueError|TypeError|Error:|Traceback|报错原文)"),
+    re.compile(r"(python3?\s+\S+\.py|bash\s+\S+\.sh|\$\s+\S+)"),  # 可复跑命令
+    re.compile(r"(results/\S+|scripts/\S+)"),    # 产物路径
+    # 数字在前、单位在后（"1.23 ms"），或指标名在前（"rel_l2 = 0.001"）
+    re.compile(
+        r"(?<![\w.])\d+(?:\.\d+)?\s*(?:ms|us|µs|ns|s|TFLOPS|GB/s|%|x|×)(?![\w.])"
+        r"|\b(rel_l2|max_abs|cos|ratio)\b\s*[=:≈]?\s*\d",
+        re.I,
+    ),
+)
 
-    为什么要把 results/ 也塞进来：agent 常常只说"见 results/xx.log"，
-    正文里没有报错原文。按产物判定，就该把那个文件本身当证据。
+
+def _evidence_from(attempt_dir: str, report: str) -> list[str]:
+    """证据 = 可核对的具体片段 + results/ 下的原始输出。
+
+    只收三类，各自对应一种"能核"的东西：
+      1. 报告里的代码块 / 报错原文 / 复跑命令 / 产物路径 / 带单位的数字
+      2. results/ 下每个文件本身（含其前 4000 字符）
+    散文行不算证据。一个 agent 写 200 行说明而没跑过任何命令，
+    和写 5 行但贴了报错 + 命令，后者才叫有证据。
     """
-    evidence = [line for line in report.splitlines() if line.strip()]
+    evidence: list[str] = []
+    in_code = False
+    for line in report.splitlines():
+        if line.strip().startswith("```"):
+            in_code = not in_code
+            if in_code:
+                evidence.append("```")   # 一个代码块算一条
+            continue
+        if in_code:
+            continue  # 代码块内部已整体计过一次，不再逐行累加
+        if any(p.search(line) for p in _EVIDENCE_PATTERNS):
+            evidence.append(line.strip())
+
     rdir = os.path.join(attempt_dir, "results")
     if os.path.isdir(rdir):
         for name in sorted(os.listdir(rdir)):
             p = os.path.join(rdir, name)
             if os.path.isfile(p):
-                text = _read(p)
                 evidence.append(os.path.join("results", name))
-                evidence.append(text[:4000])
+                evidence.append(_read(p)[:4000])
     return evidence
 
 

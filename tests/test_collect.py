@@ -204,3 +204,42 @@ class TestRender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEvidenceExtraction(unittest.TestCase):
+    """证据只认可核对的片段，散文行不算。"""
+
+    def test_code_block_counted_once(self):
+        rep = "说明\n```\nline1\nline2\nline3\n```\n"
+        ev = C._evidence_from("/nonexistent", rep)
+        self.assertEqual(ev.count("```"), 1)
+        self.assertFalse(any("line2" in e for e in ev))
+
+    def test_error_and_command_and_path(self):
+        rep = (
+            "普通的一句话。\n"
+            "报错原文：RuntimeError: boom\n"
+            "python3 scripts/probe.py\n"
+            "见 results/probe.json\n"
+            "实测 1.23 ms\n"
+        )
+        ev = C._evidence_from("/nonexistent", rep)
+        self.assertTrue(any("RuntimeError" in e for e in ev))
+        self.assertTrue(any("python3" in e for e in ev))
+        self.assertTrue(any("results/probe.json" in e for e in ev))
+        self.assertTrue(any("1.23 ms" in e for e in ev))
+        self.assertFalse(any(e == "普通的一句话。" for e in ev))
+
+    def test_prose_only_yields_nothing(self):
+        rep = "我觉得不可用。\n因为 dtype 不支持。\n大概吧。\n"
+        with tempfile.TemporaryDirectory() as d:
+            ev = C._evidence_from(d, rep)
+        self.assertEqual(ev, [])
+
+    def test_results_files_counted(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "results"))
+            with open(os.path.join(d, "results", "x.json"), "w", encoding="utf-8") as f:
+                json.dump({"rel_l2": 0.001}, f)
+            ev = C._evidence_from(d, "")
+        self.assertTrue(any(e.startswith("results/") for e in ev))
