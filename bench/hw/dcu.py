@@ -108,19 +108,41 @@ def current_sclk() -> int | None:
     多卡取**最小值**：只要有一张卡在降频，拿别的卡的读数当"机器状态"
     就会把降频状态测成工作档。
     """
-    mhz = [m for _, m in _sclk_levels()]
-    return min(mhz) if mhz else None
+    return current_sclk_detail()["min_mhz"]
 
 
-def current_sclk_detail() -> dict:
-    """{levels: [...], mhz: [...], min_mhz, min_level, perf_level}。全解析不到给空。"""
-    levels = _sclk_levels()
+def current_sclk_detail(samples: int = 1, interval_s: float = 0.4) -> dict:
+    """{levels: [...], mhz: [...], min_mhz, min_level, perf_level}。全解析不到给空。
+
+    samples > 1 时多次采样、按卡取**众数**（并列取低档）。原因：auto DPM
+    下，刚跑完一段负载的卡会在 1200/1350 之间抖动一下，单次采样会把
+    "本项目自己的探针刚把卡推上去"读成"机器在降频"，每次 doctor 都报一条
+    假 warn。众数读的是持续状态。
+    """
+    snapshots = []
+    for i in range(max(1, samples)):
+        snapshots.append(_sclk_levels())
+        if i + 1 < samples:
+            time.sleep(interval_s)
+
+    ncards = max((len(s) for s in snapshots), default=0)
+    levels: list[int] = []
+    for card in range(ncards):
+        seen = [s[card][0] for s in snapshots if len(s) > card]
+        if not seen:
+            continue
+        counts = {lv: seen.count(lv) for lv in set(seen)}
+        top = max(counts.values())
+        levels.append(min(lv for lv, c in counts.items() if c == top))
+
     perf = _perf_levels()
+    mhz = [SCLK_LEVELS_MHZ.get(lv) for lv in levels]
+    mhz = [m for m in mhz if m is not None]
     return {
-        "levels": [lv for lv, _ in levels],
-        "mhz": [m for _, m in levels],
-        "min_mhz": min((m for _, m in levels), default=None),
-        "min_level": min((lv for lv, _ in levels), default=None),
+        "levels": levels,
+        "mhz": mhz,
+        "min_mhz": min(mhz) if mhz else None,
+        "min_level": min(levels) if levels else None,
         "perf_level": perf[0] if perf else None,
     }
 

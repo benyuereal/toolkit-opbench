@@ -102,7 +102,9 @@ def _check_l2():
 def _check_sclk():
     from bench.hw import dcu
 
-    d = dcu.current_sclk_detail()
+    # 多次采样取众数：单次采样会把 auto DPM 的抖动读成"在降频"，
+    # 每次体检都报一条假 warn。样本间隔足够短，不受另一会话的秒级波动影响。
+    d = dcu.current_sclk_detail(samples=3)
     if d["min_mhz"] is None:
         return _item(
             False, "读不到",

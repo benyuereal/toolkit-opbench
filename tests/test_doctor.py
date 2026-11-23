@@ -48,6 +48,38 @@ class TestSclkParsing(unittest.TestCase):
             self.assertIsNone(dcu.current_sclk())
             self.assertIsNone(dcu.current_sclk_detail()["min_mhz"])
 
+    @staticmethod
+    def _fake_hy_smi(g_outputs, perf="auto"):
+        """按命令分派假 hy-smi：-g 依次吐 g_outputs，-p 固定。"""
+        seq = iter(g_outputs)
+
+        def run(args, timeout=15.0):
+            if args and args[0] == "-g":
+                return next(seq, g_outputs[-1])
+            if args and args[0] == "-p":
+                return f"HCU[0]\t\t: Performance Level: {perf}\n"
+            return ""
+
+        return run
+
+    def test_keeps_stable_low_card(self):
+        with mock.patch.object(dcu, "_run", side_effect=self._fake_hy_smi([SAMPLE_G] * 3)), \
+             mock.patch.object(dcu.time, "sleep", return_value=None):
+            d = dcu.current_sclk_detail(samples=3)
+        self.assertEqual(d["levels"], [5, 8])  # card0 稳定 5，card1 稳定 8
+
+    def test_mode_beats_single_spike(self):
+        """负载刚结束时的单次抖动（1200）不该被读成"在降频"。"""
+        spikes = [
+            "HCU[0]: sclk clock level: 8 (1350Mhz)\n",
+            "HCU[0]: sclk clock level: 5 (1200Mhz)\n",
+            "HCU[0]: sclk clock level: 8 (1350Mhz)\n",
+        ]
+        with mock.patch.object(dcu, "_run", side_effect=self._fake_hy_smi(spikes)), \
+             mock.patch.object(dcu.time, "sleep", return_value=None):
+            d = dcu.current_sclk_detail(samples=3)
+        self.assertEqual(d["min_level"], 8)
+
     def test_busy_parses_pcts(self):
         with mock.patch.object(dcu, "_run", side_effect=lambda a, timeout=15.0: SAMPLE_U):
             self.assertEqual(dcu._busy_pcts(), [3.0, 97.5])
