@@ -1,0 +1,29 @@
+# 快速回归套件 —— 每次改 skill 后跑，约 2.5 小时/臂
+name: smoke
+description: 2 道 L5 + 3 道 L1 + 1 道 L3，覆盖幻觉、定位、边界决策
+needs_gpu: true
+tasks:
+  - id: moe-asm-fmoe-l5
+    tier: L5
+    budget: 600
+    needs_gpu: false
+  - id: gemm-fp8-l5
+    tier: L5
+    budget: 600
+    needs_gpu: true
+  - id: norm-fused-add-rmsnorm-l1
+    tier: L1
+    budget: 1800
+    needs_gpu: true
+  - id: gemm-bf16-l1
+    tier: L1
+    budget: 1800
+    needs_gpu: true
+  - id: moe-gating-l1
+    tier: L1
+    budget: 1800
+    needs_gpu: true
+  - id: moe-fusion-boundary-l3
+    tier: L3
+    budget: 2700
+    needs_gpu: true

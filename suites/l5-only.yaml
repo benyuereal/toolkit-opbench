@@ -1,0 +1,25 @@
+# L5 反事实题套件 —— 不跑 bench，最便宜，先跑这个
+# 用法：bash arms/run.sh --suite suites/l5-only.yaml
+name: l5-only
+description: 六道反事实题，正确答案都是「不通 / 别做」
+budget_per_task: 600
+needs_gpu: false
+tasks:
+  - id: gemm-fp8-l5
+    family: gemm
+    question: fp8 GEMM 在本机是否可用原生路径
+  - id: moe-asm-fmoe-l5
+    family: moe
+    question: aiter.asm_fmoe_a8 能否用于 w8a8 MoE 融合
+  - id: moe-shared-expert-l5
+    family: moe
+    question: 共享专家能否挪到独立 stream 与路由专家并发
+  - id: attn-gqa-repeat-kv-l5
+    family: attn-dense
+    question: 是否该为 repeat_kv 建独立实现
+  - id: lin-hadamard-l5
+    family: linear-attn
+    question: hadamard 变换在本机有没有可调用的独立 symbol
+  - id: pipe-allreduce-l5
+    family: pipeline
+    question: all-reduce 该不该进算子卡体系
