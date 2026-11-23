@@ -1,0 +1,26 @@
+{
+  "id": "family-op-tier",
+  "kind": "kernel",
+  "family": "gemm",
+  "tier": "L1",
+  "precision": ["bfloat16"],
+  "axes": {
+    "M": {"type": "var"},
+    "N": {"type": "const", "value": 4096},
+    "K": {"type": "const", "value": 4096}
+  },
+  "inputs": {
+    "A": {"shape": ["M", "K"], "dtype": "bfloat16"},
+    "B": {"shape": ["K", "N"], "dtype": "bfloat16"}
+  },
+  "outputs": {
+    "C": {"shape": ["M", "N"], "dtype": "bfloat16"}
+  },
+  "tolerance": {"rtol": 0.02, "atol": 0.01},
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "fp8_peak_nominal",
+    "requires_graph_capture": false,
+    "min_l2_flush_mb": 16
+  }
+}

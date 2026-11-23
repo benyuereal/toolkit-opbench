@@ -1,0 +1,53 @@
+# 全量套件：39 道题，分批跑（约 3 人天/臂）
+name: full
+description: 九家族 × 五层，完整评测
+needs_gpu: true
+tasks:
+  # gemm 6
+  - {id: gemm-bf16-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: gemm-quant-per-token-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: gemm-int8-l2, tier: L2, budget: 1800, needs_gpu: true}
+  - {id: gemm-batched-l2, tier: L2, budget: 1800, needs_gpu: true}
+  - {id: gemm-swiglu-epilogue-l3, tier: L3, budget: 2700, needs_gpu: true}
+  - {id: gemm-fp8-l5, tier: L5, budget: 600, needs_gpu: true}
+  # moe 7
+  - {id: moe-gating-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: moe-align-permute-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: moe-grouped-gemm-w8a8-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: moe-fusion-boundary-l3, tier: L3, budget: 2700, needs_gpu: true}
+  - {id: moe-end2end-combine-l4, tier: L4, budget: 7200, needs_gpu: true}
+  - {id: moe-asm-fmoe-l5, tier: L5, budget: 600, needs_gpu: false}
+  - {id: moe-shared-expert-l5, tier: L5, budget: 600, needs_gpu: true}
+  # attn-dense 5
+  - {id: attn-paged-decode-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: attn-flash-fwd-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: attn-prefill-split-l2, tier: L2, budget: 1800, needs_gpu: true}
+  - {id: attn-end2end-mla-patch-l4, tier: L4, budget: 7200, needs_gpu: true}
+  - {id: attn-gqa-repeat-kv-l5, tier: L5, budget: 600, needs_gpu: false}
+  # attn-mla 5
+  - {id: mla-sparse-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: mla-mqa-logits-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: mla-kv-layout-l2, tier: L2, budget: 1800, needs_gpu: true}
+  - {id: mla-absorb-vs-full-l3, tier: L3, budget: 2700, needs_gpu: true}
+  - {id: mla-end2end-attn-l4, tier: L4, budget: 7200, needs_gpu: true}
+  # norm-act 4
+  - {id: norm-fused-add-rmsnorm-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: norm-rmsnorm-variant-l2, tier: L2, budget: 1800, needs_gpu: true}
+  - {id: act-swiglu-fused-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: act-gelu-geglu-l2, tier: L2, budget: 1800, needs_gpu: true}
+  # kv 4
+  - {id: kv-paged-write-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: kv-layout-l2, tier: L2, budget: 1800, needs_gpu: true}
+  - {id: kv-copy-overlap-l3, tier: L3, budget: 2700, needs_gpu: true}
+  - {id: kv-end2end-hicache-l4, tier: L4, budget: 7200, needs_gpu: true}
+  # linear-attn 3
+  - {id: lin-causal-conv1d-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: lin-mhc-fused-l2, tier: L2, budget: 1800, needs_gpu: true}
+  - {id: lin-hadamard-l5, tier: L5, budget: 600, needs_gpu: false}
+  # head-sample 2
+  - {id: head-lm-sampling-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: head-topk-topp-l2, tier: L2, budget: 1800, needs_gpu: true}
+  # pipeline 3
+  - {id: pipe-segments-l3, tier: L3, budget: 2700, needs_gpu: true}
+  - {id: pipe-overlap-discrim-l3, tier: L3, budget: 2700, needs_gpu: true}
+  - {id: pipe-allreduce-l5, tier: L5, budget: 600, needs_gpu: false}

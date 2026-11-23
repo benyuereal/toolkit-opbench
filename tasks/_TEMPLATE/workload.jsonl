@@ -1,0 +1,3 @@
+{"axes": {"M": 4096}, "inputs": {"A": {"type": "random"}, "B": {"type": "random"}}, "uuid": "pub-1", "split": "public"}
+{"axes": {"M": 8192}, "inputs": {"A": {"type": "random"}, "B": {"type": "random"}}, "uuid": "pub-2", "split": "public"}
+{"axes": {"M": 13312}, "inputs": {"A": {"type": "random"}, "B": {"type": "random"}}, "uuid": "hold-1", "split": "holdout"}
