@@ -9,7 +9,7 @@ ARM     ?= c
 RUNS    ?= runs
 OUT     ?= reports
 
-.PHONY: help test doctor prepare run verify score report check-env clean
+.PHONY: help test doctor prepare run verify score report check-env clean cycle
 
 help:
 	@echo "make test                 跑单测（无需 GPU）"
@@ -19,6 +19,7 @@ help:
 	@echo "make verify RUNS=runs     验证产物（只认产物，不信自报）"
 	@echo "make score RUNS=runs      计分"
 	@echo "make report               汇总成报告"
+	@echo "make cycle [TASKS='...']  完整周期（基线→三臂→校验→汇总）"
 	@echo "make check-env            打印被测版本与依赖快照"
 
 test:
@@ -41,6 +42,11 @@ score:
 
 report:
 	$(PY) -m harness.collect --runs $(RUNS) --out $(OUT)
+
+# 完整周期：基线 → 三臂 → 校验 → 汇总，一道命令走完
+TASKS ?= gemm-bf16-l1 norm-fused-add-rmsnorm-l1 moe-gating-l1
+cycle:
+	$(PY) -m harness.cycle --tasks $(TASKS)
 
 check-env:
 	@echo "=== 本仓库 ==="; git rev-parse --short HEAD

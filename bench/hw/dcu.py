@@ -148,15 +148,44 @@ def current_sclk_detail(samples: int = 1, interval_s: float = 0.4) -> dict:
 
 
 def is_busy(threshold: float = BUSY_THRESHOLD) -> bool:
-    """任一卡 HCU% > threshold 即视为占用。GPU 串行的判断依据。
+    """**所有**卡都忙才算忙？不——默认仍是"任一卡忙即忙"，见 free_devices。
 
-    读不到占用率时**按忙处理**：宁可多等一次，也不要在不确定的情况下
-    往正在跑的卡上叠负载——那会同时污染两边。
+    保留这个"保守"语义给 doctor 用：体检时要知道整机状态。
+    跑 bench 请用 `pick_device()`，它会挑一张空闲卡并绑上去。
     """
     pcts = _busy_pcts()
     if not pcts:
         return True
     return max(pcts) > threshold
+
+
+def free_devices(threshold: float = BUSY_THRESHOLD) -> list[int]:
+    """返回占用率 <= threshold 的卡号。读不到占用率返回空列表（按忙处理）。"""
+    pcts = _busy_pcts()
+    if not pcts:
+        return []
+    return [i for i, p in enumerate(pcts) if p <= threshold]
+
+
+def pick_device(threshold: float = BUSY_THRESHOLD) -> int | None:
+    """挑一张空闲卡并**绑定**为当前设备。返回卡号；没有空闲卡返回 None。
+
+    为什么要绑定而不是只用 `torch.cuda.device(i)` 包一层：计时 event、
+    torch 的默认流、以及厂商库（aiter / lightop）内部拿的 stream 都跟着
+    `current_device` 走。绑一次，后面所有调用都在同一张卡上，避免
+    跨设备计时的那个坑（Event 默认绑 cuda:0）。
+
+    为什么要挑卡而不是死等：8 张卡里经常只有一两张被别的会话占着。
+    三臂都用**同一张**卡就保持了可比性——卡间差异不会混进 Δ。
+    """
+    import torch
+
+    free = free_devices(threshold)
+    if not free:
+        return None
+    dev = free[0]
+    torch.cuda.set_device(dev)
+    return dev
 
 
 @contextlib.contextmanager

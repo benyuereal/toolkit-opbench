@@ -420,17 +420,28 @@ def run_one(task_id: str, arm: str, budget_s: int,
     if record["needs_gpu"]:
         from bench.hw import dcu
 
-        with dcu.gpu_lock(wait_s=0) as lock:
+        # 等锁：并行的 agent 会短暂持锁建基线。wait_s=0 会把这种
+        # 几秒钟的碰撞当成"这轮没跑成"，白丢一个样本。
+        # 等 15 分钟够任何一次 baseline 跑完；真的被长任务占着才放弃。
+        with dcu.gpu_lock(wait_s=900, poll_s=10) as lock:
             if not lock["acquired"]:
                 record["status"] = "gpu_locked"
-                record["note"] = "另一个进程持有 GPU 锁，本轮不跑"
+                record["note"] = (f"等了 {lock.get('waited_s')}s 仍被持有"
+                                  f"（holder pid={lock.get('holder_pid')}），本轮不跑")
                 _write_attempt_meta(cwd, record, prompt)
                 return record
-            if dcu.is_busy():
+            # 挑一张空闲卡并绑上去，而不是"有一张忙就整轮放弃"。
+            # 8 张卡里通常只有一两张被别的会话占着——死等浪费 6 张。
+            # 三臂都用同一张卡（free[0]）就保持了可比性。
+            dev = dcu.pick_device()
+            if dev is None:
                 record["status"] = "gpu_busy"
-                record["note"] = f"HCU% 超阈值：{dcu._busy_pcts()}"
+                record["note"] = f"没有空闲卡：{dcu._busy_pcts()}"
                 _write_attempt_meta(cwd, record, prompt)
                 return record
+            record["device"] = dev
+            env_dev = os.environ.get("HIP_VISIBLE_DEVICES")
+            record["gpu_visible_env"] = env_dev
             record["sclk_mhz"] = dcu.ramp_to_work_clock()
             record["status"], record["exit_code"], record["wall_time_s"] = _execute(
                 cwd, prompt, arm, budget_s, max_usd, record
@@ -500,11 +511,13 @@ def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
             proc.wait(timeout=budget_s)
         except subprocess.TimeoutExpired:
             timed_out = True
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except OSError:
-                proc.kill()
+            # 杀不干净是实测踩过的坑：`su - opbench -c ...` 会在内部**再建一个
+            # session**，所以 os.killpg(proc.pid) 只杀得掉 su 本身，
+            # 内层的 claude 会逃逸成孤儿进程继续跑（实测有 38 分钟还在跑的）。
+            # 这里按子进程树递归杀，并且在 cwd 上做二次确认。
+            _kill_tree(proc.pid)
             proc.wait()
+            _kill_leftover_in_cwd(cwd)
     wall = round(time.monotonic() - started, 1)
 
     record["stdout_bytes"] = os.path.getsize(stdout_path)
@@ -527,6 +540,76 @@ def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
     if parsed is None:
         return "error", proc.returncode, wall
     return "ok", proc.returncode, wall
+
+
+def _kill_tree(pid: int) -> None:
+    """递归杀掉 pid 及其所有后代。先 SIGKILL 子进程，再杀自己。"""
+    import subprocess as sp
+
+    try:
+        out = sp.run(["ps", "-eo", "pid=,ppid="], capture_output=True, text=True).stdout
+    except OSError:
+        out = ""
+    children: dict[int, list[int]] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+
+    def walk(p: int) -> list[int]:
+        got = []
+        for c in children.get(p, []):
+            got.extend(walk(c))
+        got.append(p)
+        return got
+
+    for target in walk(pid):
+        try:
+            os.kill(target, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _kill_leftover_in_cwd(cwd: str, timeout_s: float = 5.0) -> list[int]:
+    """兜底：把 cwd 指向本 attempt 目录、但已脱离父进程的 claude 杀掉。
+
+    为什么要按 cwd 找：`su` 建的新 session 会让进程树断掉，光靠 ppid
+    找不到。而每个 attempt 有独立 cwd，这是最可靠的归属依据。
+    """
+    import subprocess as sp
+    import time
+
+    killed: list[int] = []
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        try:
+            out = sp.run(["ps", "-eo", "pid=,args="], capture_output=True,
+                         text=True).stdout
+        except OSError:
+            break
+        found = []
+        for line in out.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) != 2 or not parts[0].isdigit():
+                continue
+            pid = int(parts[0])
+            if "claude -p" not in parts[1]:
+                continue
+            try:
+                if os.readlink(f"/proc/{pid}/cwd") == os.path.realpath(cwd):
+                    found.append(pid)
+            except OSError:
+                continue
+        if not found:
+            break
+        for pid in found:
+            try:
+                os.kill(pid, signal.SIGKILL)
+                killed.append(pid)
+            except OSError:
+                pass
+        time.sleep(0.2)
+    return killed
 
 
 def _shq(s: str) -> str:
