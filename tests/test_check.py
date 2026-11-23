@@ -569,6 +569,8 @@ class TestTaskFilesTracked(unittest.TestCase):
     """
 
     def test_all_task_files_committed(self):
+        """六件套必须入库。允许"还没写完"（缺 expect.md 等）不算违规——
+        那种情况由 TaskIntegrity 那组测试在题目完成时守。"""
         import subprocess
 
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -581,11 +583,15 @@ class TestTaskFilesTracked(unittest.TestCase):
             td = os.path.join(root, "tasks", task)
             if not os.path.isdir(td):
                 continue
-            # 只查六件套，不扫目录里的一切（会误判 __pycache__ 之类）
-            for name in ("task.md", "definition.json", "workload.jsonl",
-                         "reference.py", "check.py", "expect.md"):
-                if not os.path.exists(os.path.join(td, name)):
-                    continue
+            # 只查六件套，不扫目录里的一切（会误判 __pycache__ 之类）。
+            # 只有在**六件套齐全**（这题写完了）时才要求全部入库；
+            # 写到一半的题由子 agent 自己的交付确认，不在本测试里判。
+            names = ("task.md", "definition.json", "workload.jsonl",
+                     "reference.py", "check.py", "expect.md")
+            complete = all(os.path.exists(os.path.join(td, n)) for n in names)
+            if not complete:
+                continue
+            for name in names:
                 rel = os.path.join("tasks", task, name)
                 if rel not in tracked:
                     missing.append(rel)
