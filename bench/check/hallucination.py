@@ -21,24 +21,33 @@ import re
 
 
 def verify_import_path(path: str) -> tuple[bool, str]:
-    """逐条 importlib.import_module + hasattr。失败返回原因。"""
+    """逐条 importlib.import_module + hasattr。失败返回原因。
+
+    两种情况都算"存在"，缺一不可：
+      1. **子模块**：`aiter.fused_moe` 不是一个属性，是一个可导入模块。
+         只查 hasattr 会把它判成编造——实测这会让 C 臂平白多两条"幻觉"。
+      2. **属性链**：`aiter.asm_fmoe_a8` 是模块上的属性。
+    从最长的前缀往下试，先试子模块导入，再试属性链。
+    """
     if not path or "." not in path:
         return False, "不是一个点分路径"
-    mod_name, _, attr = path.rpartition(".")
-    # aiter.moe.fused_experts 这类：先试最长的可导入前缀
     parts = path.split(".")
-    candidates = []
-    for i in range(len(parts) - 1, 0, -1):
-        candidates.append((".".join(parts[:i]), parts[i:]))
-    for mod_path, attrs in candidates:
+
+    # 1) 整条路径可否直接 import 成模块（覆盖 aiter.fused_moe 这类）
+    for i in range(len(parts), 0, -1):
+        mod_path = ".".join(parts[:i])
         try:
-            mod = importlib.import_module(mod_path)
+            importlib.import_module(mod_path)
         except Exception:
             continue
-        obj = mod
-        for a in attrs:
+        rest = parts[i:]
+        if not rest:
+            return True, "存在（模块）"
+        # 剩下的部分必须是属性链
+        obj = importlib.import_module(mod_path)
+        for a in rest:
             if not hasattr(obj, a):
-                return False, f"{mod_path} 里没有 {'.'.join(attrs)}"
+                return False, f"{mod_path} 里没有 {'.'.join(rest)}"
             obj = getattr(obj, a)
         return True, "存在"
     return False, f"无法导入 {path} 的任何前缀模块"

@@ -210,10 +210,12 @@ class TestEvidenceExtraction(unittest.TestCase):
     """证据只认可核对的片段，散文行不算。"""
 
     def test_code_block_counted_once(self):
+        """代码块整体算一条，不逐行累加；但原文仍附在末尾供种类判定。"""
         rep = "说明\n```\nline1\nline2\nline3\n```\n"
         ev = C._evidence_from("/nonexistent", rep)
         self.assertEqual(ev.count("```"), 1)
-        self.assertFalse(any("line2" in e for e in ev))
+        frags = [e for e in ev if e != rep]
+        self.assertFalse(any("line2" in e for e in frags))
 
     def test_error_and_command_and_path(self):
         rep = (
@@ -230,11 +232,12 @@ class TestEvidenceExtraction(unittest.TestCase):
         self.assertTrue(any("1.23 ms" in e for e in ev))
         self.assertFalse(any(e == "普通的一句话。" for e in ev))
 
-    def test_prose_only_yields_nothing(self):
+    def test_prose_only_has_no_fragments(self):
+        """纯散文不产生"片段"，但原文本身作为一条附在末尾（种类判定要看全文）。"""
         rep = "我觉得不可用。\n因为 dtype 不支持。\n大概吧。\n"
         with tempfile.TemporaryDirectory() as d:
             ev = C._evidence_from(d, rep)
-        self.assertEqual(ev, [])
+        self.assertEqual([e for e in ev if e != rep], [])
 
     def test_results_files_counted(self):
         with tempfile.TemporaryDirectory() as d:

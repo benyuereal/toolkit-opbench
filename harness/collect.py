@@ -176,6 +176,12 @@ def _evidence_from(attempt_dir: str, report: str) -> list[str]:
             if os.path.isfile(p):
                 evidence.append(os.path.join("results", name))
                 evidence.append(_read(p)[:4000])
+
+    # 原文本身也算一条：`evidence_required` 问的是"报告里有没有出现这类
+    # 证据"，不是"有没有出现在我筛过的摘要里"。过滤只用于**计数**，
+    # 不能反过来把证据种类判丢——否则写了 `import aiter` 的报告会被判
+    # 成没有 import 证据。
+    evidence.append(report)
     return evidence
 
 

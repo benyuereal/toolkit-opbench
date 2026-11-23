@@ -377,3 +377,64 @@ class TestArmBudgetComparability(unittest.TestCase):
 
         with unittest.mock.patch.object(run, "RUNS_DIR", tempfile.mkdtemp()):
             self.assertEqual(run.assert_arms_comparable("none", 1800, 3.0), [])
+
+
+class TestClaimsExtraction(unittest.TestCase):
+    """声明抽取的两个方向都要守住：
+    不能把局部变量当编造（假阳），也不能把幽灵库当局部变量漏掉（假阴）。
+    """
+
+    def _claims(self, report="", scripts=None):
+        import tempfile
+        from bench.data import solution as sol_mod
+
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, "report.md"), "w", encoding="utf-8") as f:
+                f.write(report)
+            if scripts:
+                os.makedirs(os.path.join(d, "scripts"))
+                for name, body in scripts.items():
+                    with open(os.path.join(d, "scripts", name), "w", encoding="utf-8") as f:
+                        f.write(body)
+            return sol_mod.extract_claims(d)["import_paths"]
+
+    def test_local_variables_not_claims(self):
+        paths = self._claims(
+            "```\na, x = f()\na8, a8s = make_quant(x)\nscore = g()\n"
+            "a.abs()\na8.float()\nscore.float()\n```\n"
+        )
+        self.assertEqual(paths, [], paths)
+
+    def test_ghost_library_is_claim(self):
+        paths = self._claims("调用 ghostlib.no_such_fn(3) 与 hipblaslt.gemm(x)\n")
+        self.assertIn("ghostlib.no_such_fn", paths)
+        self.assertIn("hipblaslt.gemm", paths)
+
+    def test_alias_normalized(self):
+        paths = self._claims(
+            "```\nfrom torch.nn import functional as F\nF.silu(x)\n```\n"
+        )
+        self.assertIn("torch.nn.functional.silu", paths)
+
+    def test_bindings_merged_across_files(self):
+        """报告里的代码块常是脚本节选：变量在脚本定义、在报告使用。"""
+        paths = self._claims(
+            "```\nscore = torch.randn(4, 2)\nrow = score.float()\n```\n",
+            scripts={"s.py": "score = torch.randn(4, 2)\nrow = score.float()\n"},
+        )
+        self.assertNotIn("score.float", paths)
+        self.assertIn("torch.randn", paths)
+
+    def test_function_parameter_not_claim(self):
+        paths = self._claims("```\ndef f(input, line):\n    input.data_ptr()\n    line.strip()\n```\n")
+        self.assertEqual(paths, [], paths)
+
+    def test_real_library_kept(self):
+        paths = self._claims("```\nimport aiter\naiter.asm_fmoe_a8(o, ...)\n```\n")
+        self.assertIn("aiter.asm_fmoe_a8", paths)
+
+    def test_submodule_counts_as_existing(self):
+        from bench.check import hallucination as H
+
+        ok, why = H.verify_import_path("json.decoder")
+        self.assertTrue(ok, why)
