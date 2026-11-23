@@ -1,4 +1,4 @@
-# tookit-openeval-skills · 项目设计（待审）
+# toolkit-opbench · 项目设计（待审）
 
 > 目标：**测增益，不跑分。** 同等预算下，带 skill 的 agent 比裸 Claude Code 好多少。
 > 允许结论是「没更好」——那就该砍文档，而不是继续加。
@@ -8,7 +8,7 @@
 ## 一、目录结构
 
 ```
-tookit-openeval-skills/
+toolkit-opbench/
 ├── README.md                    项目是什么、怎么跑、三条铁律
 ├── protocol.md                  操作协议：隔离 / GPU 互斥 / 评分 / 防作弊
 ├── docs/
