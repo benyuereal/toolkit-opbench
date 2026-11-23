@@ -250,3 +250,88 @@ class TestRunHelpers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestArms(unittest.TestCase):
+    """三臂的上下文注入：只差「一行资源声明」是实验有效性的前提。"""
+
+    def test_prompts_share_task_text(self):
+        from harness.arms import a, b, c
+
+        task = "# 题目\n\n背景...\n"
+        for mod in (a, b, c):
+            self.assertIn(task.strip(), mod.build_prompt(task))
+
+    def test_prompts_differ_by_one_declaration(self):
+        from harness.arms import a, b, c
+
+        task = "# 题目"
+        pa, pb, pc = (m.build_prompt(task) for m in (a, b, c))
+        # 去掉最后一段声明后必须完全一致
+        self.assertEqual(pa.rsplit("---", 1)[0].strip(), task)
+        self.assertEqual(pb.rsplit("---", 1)[0].strip(), task)
+        self.assertEqual(pc.rsplit("---", 1)[0].strip(), task)
+        self.assertNotEqual(pa, pb)
+        self.assertNotEqual(pb, pc)
+
+    def test_a_arm_does_not_leak_skill_words(self):
+        from harness.arms import a
+
+        p = a.build_prompt("# 题目")
+        for word in ("toolkit_skills", "atlas", "scenario", "failure-mode"):
+            self.assertNotIn(word, p)
+
+    def test_a_arm_stages_nothing(self):
+        import tempfile
+        from harness.arms import a
+
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(a.stage_files(d), [])
+
+    def test_b_arm_copies_registry_not_symlinks(self):
+        import tempfile
+        from harness.arms import b
+
+        with tempfile.TemporaryDirectory() as d:
+            staged = b.stage_files(d)
+            self.assertEqual(staged, ["libraries-registry.yaml"])
+            p = os.path.join(d, "libraries-registry.yaml")
+            self.assertTrue(os.path.isfile(p))
+            self.assertFalse(os.path.islink(p), "软链会让 B 臂顺着路径变成 C 臂")
+            self.assertEqual(os.stat(p).st_mode & 0o777, 0o444)
+
+    def test_b_prompt_mentions_registry_only(self):
+        from harness.arms import b
+
+        p = b.build_prompt("# 题目")
+        self.assertIn("libraries-registry.yaml", p)
+        self.assertNotIn("toolkit_skills", p)
+
+    @unittest.skipUnless(os.path.isdir("/workspace/toolkit_skills"), "skill 未挂载")
+    def test_c_arm_symlinks_skill(self):
+        import tempfile
+        from harness.arms import c
+
+        with tempfile.TemporaryDirectory() as d:
+            mounted = c.mount(d)
+            self.assertEqual(mounted, ["skill"])
+            link = os.path.join(d, "skill")
+            self.assertTrue(os.path.islink(link))
+            self.assertEqual(os.path.realpath(link), os.path.realpath(c.SKILL_ROOT))
+
+    @unittest.skipUnless(os.path.isdir("/workspace/toolkit_skills"), "skill 未挂载")
+    def test_c_skill_version_recorded(self):
+        from harness.arms import c
+
+        v = c.skill_version()
+        self.assertEqual(v["root"], c.SKILL_ROOT)
+        self.assertIsInstance(v["git_head"], str)
+
+    def test_c_missing_skill_raises(self):
+        import tempfile
+        from harness.arms import c
+
+        with tempfile.TemporaryDirectory() as d, \
+             unittest.mock.patch.object(c, "SKILL_ROOT", "/nonexistent/skill"):
+            with self.assertRaises(FileNotFoundError):
+                c.mount(d)
