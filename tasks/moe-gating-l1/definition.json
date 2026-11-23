@@ -1,0 +1,70 @@
+{
+  "id": "moe-gating-l1",
+  "kind": "kernel",
+  "family": "moe",
+  "tier": "L1",
+  "precision": [
+    "float32"
+  ],
+  "axes": {
+    "M": {
+      "type": "var",
+      "domain": {
+        "values": [
+          4096,
+          8192,
+          13312
+        ]
+      }
+    },
+    "E": {
+      "type": "const",
+      "value": 64
+    },
+    "TOPK": {
+      "type": "const",
+      "value": 8
+    }
+  },
+  "inputs": {
+    "gating_output": {
+      "shape": [
+        "M",
+        "E"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "topk_weights": {
+      "shape": [
+        "M",
+        "TOPK"
+      ],
+      "dtype": "float32"
+    },
+    "topk_indices": {
+      "shape": [
+        "M",
+        "TOPK"
+      ],
+      "dtype": "int32"
+    }
+  },
+  "tolerance": {
+    "rtol": 0.02,
+    "atol": 0.01
+  },
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:read",
+    "work": "2*M*E*4 + 2*M*TOPK*6",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true,
+    "baseline_impl": "harness.implementations.aiter_topk_softmax",
+    "extra_args": [
+      8
+    ]
+  }
+}

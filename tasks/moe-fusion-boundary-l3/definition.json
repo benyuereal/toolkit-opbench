@@ -1,0 +1,13 @@
+{
+  "id": "moe-fusion-boundary-l3",
+  "kind": "judgment",
+  "family": "moe",
+  "tier": "L3",
+  "question": "MoE 一层的五段（Dispatch → Gate/Up GEMM → SwiGLU → Down GEMM → Combine）里，部分融合与全拆分的分界点在哪里",
+  "expected_verdict": "conditional",
+  "verdict_keywords": ["拐点", "32", "64", "M/exp", "规则", "阈值"],
+  "forbidden_claims": ["融合一定更快", "全部融合最好", "预期提升 30%"],
+  "evidence_required": ["call", "command", "error_output"],
+  "needs_gpu": true,
+  "notes": "L3 考的是给拐点/规则，不是给结论。参考答案见 expect.md。"
+}
