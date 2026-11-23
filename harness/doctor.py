@@ -135,10 +135,12 @@ def _check_sclk():
     )
 
 
-def _check_clock_lock():
+def _check_clock_lock(busy_before: list[float] | None = None):
     from bench.hw import dcu
 
-    busy = dcu._busy_pcts()
+    # 用**体检开始时**的占用率，不用此刻的：本函数前面几项（event_timing）
+    # 自己就会跑负载，此刻读到的高占用是 doctor 自己造成的，不是另一个会话。
+    busy = busy_before if busy_before is not None else dcu._busy_pcts()
     if busy and max(busy) > dcu.BUSY_THRESHOLD:
         return _item(
             False,
@@ -181,10 +183,10 @@ def _check_libs():
     return _item(True, shown)
 
 
-def _check_gpu_free():
+def _check_gpu_free(busy_before: list[float] | None = None):
     from bench.hw import dcu
 
-    pcts = dcu._busy_pcts()
+    pcts = busy_before if busy_before is not None else dcu._busy_pcts()
     if not pcts:
         return _item(
             False, "读不到占用率",
@@ -252,10 +254,22 @@ _RUNNERS = {
 def run() -> dict:
     """逐项跑，返回 {name: {ok, value, fix_hint}}。"""
     table: dict = {}
+    # 占用率必须在**任何 doctor 自己的负载之前**取一次：event_timing 与
+    # ramp 都会把卡压上去，之后再读会把自造的负载当成"另一会话在占卡"。
+    try:
+        from bench.hw import dcu as _dcu
+
+        busy_at_start = _dcu._busy_pcts()
+    except Exception:
+        busy_at_start = None
+
     for name, title in CHECKS:
         fn = _RUNNERS[name]
         try:
-            item = fn()
+            if name in ("clock_lock", "gpu_free"):
+                item = fn(busy_before=busy_at_start)
+            else:
+                item = fn()
         except Exception as e:  # 单项炸掉不该让整张体检表消失
             item = _item(
                 False, f"{type(e).__name__}: {e}",
