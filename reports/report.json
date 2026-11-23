@@ -1,0 +1,402 @@
+{
+  "tasks": [
+    "moe-gating-l1",
+    "norm-fused-add-rmsnorm-l1"
+  ],
+  "arms": [
+    "A",
+    "B",
+    "C"
+  ],
+  "deltas": {
+    "A": {
+      "n": 2,
+      "eff_pct": 100.0,
+      "halluc_mean": 0.015625,
+      "judged_mean": null,
+      "leaked": 0
+    },
+    "B": {
+      "n": 2,
+      "eff_pct": 100.0,
+      "halluc_mean": 0.027777777777777776,
+      "judged_mean": null,
+      "leaked": 0
+    },
+    "C": {
+      "n": 2,
+      "eff_pct": 100.0,
+      "halluc_mean": 0.025,
+      "judged_mean": null,
+      "leaked": 0
+    },
+    "d_eff_C_minus_A": 0.0,
+    "d_eff_B_minus_A": 0.0,
+    "d_eff_C_minus_B": 0.0,
+    "d_halluc_C_minus_A": 0.01,
+    "d_halluc_B_minus_A": 0.01,
+    "verdicts": [
+      "Δ_eff(C−A) < 20pt ⇒ 该砍文档，不是加文档",
+      "B 与 C 差 < 10pt ⇒ 判据层无价值，只留库清单",
+      "Δ_halluc(C−A) > 0 ⇒ 立刻停，skill 在教模型编答案"
+    ],
+    "balanced": true
+  },
+  "table": {
+    "moe-gating-l1/A": {
+      "task": "moe-gating-l1",
+      "arm": "A",
+      "status": "ok",
+      "wall_time_s": 1140.0,
+      "tokens": 31992,
+      "artifacts": 3,
+      "has_report": true,
+      "effective": true,
+      "effective_why": "有命令 + 数字/原始输出",
+      "judged": null,
+      "judged_why": null,
+      "halluc_rate": 0.03125,
+      "halluc": {
+        "checked": 32,
+        "failed": [
+          [
+            "prof.key_averages",
+            "无法导入 prof.key_averages 的任何前缀模块"
+          ]
+        ],
+        "rate": 0.03125,
+        "claims": {
+          "import_paths": [
+            "prof.key_averages",
+            "statistics.median",
+            "sys.exit",
+            "time.perf_counter",
+            "torch.cuda.CUDAGraph",
+            "torch.cuda.Event",
+            "torch.cuda.get_device_name",
+            "torch.cuda.get_device_properties",
+            "torch.cuda.graph",
+            "torch.cuda.init",
+            "torch.cuda.synchronize",
+            "torch.device",
+            "torch.empty",
+            "torch.empty_like",
+            "torch.profiler",
+            "torch.randn",
+            "torch.softmax",
+            "torch.topk",
+            "triton.language",
+            "triton.language.arange",
+            "triton.language.argmax",
+            "triton.language.exp",
+            "triton.language.load",
+            "triton.language.max",
+            "triton.language.program_id",
+            "triton.language.sort",
+            "triton.language.static_range",
+            "triton.language.store",
+            "triton.language.sum",
+            "triton.language.where"
+          ],
+          "libraries": [
+            "torch",
+            "triton"
+          ],
+          "numbers": [],
+          "files_scanned": [
+            "report.md",
+            "scripts/bench_gating.py"
+          ]
+        }
+      },
+      "leaks": {},
+      "leaked": false
+    },
+    "norm-fused-add-rmsnorm-l1/A": {
+      "task": "norm-fused-add-rmsnorm-l1",
+      "arm": "A",
+      "status": "ok",
+      "wall_time_s": 1313.5,
+      "tokens": 56295,
+      "artifacts": 12,
+      "has_report": true,
+      "effective": true,
+      "effective_why": "有命令 + 数字/原始输出",
+      "judged": null,
+      "judged_why": null,
+      "halluc_rate": 0.0,
+      "halluc": {
+        "checked": 30,
+        "failed": [],
+        "rate": 0.0,
+        "claims": {
+          "import_paths": [
+            "lightop.norm",
+            "lightop.norm.fused_add_rms_norm",
+            "lightop.norm.fused_add_rms_norm_opt",
+            "os.path.abspath",
+            "os.path.dirname",
+            "sys.path.insert",
+            "torch.cuda.Event",
+            "torch.cuda.empty_cache",
+            "torch.cuda.get_device_name",
+            "torch.cuda.set_device",
+            "torch.cuda.synchronize",
+            "torch.empty",
+            "torch.empty_like",
+            "torch.equal",
+            "torch.manual_seed",
+            "torch.randn",
+            "torch.rsqrt",
+            "torch.sum",
+            "triton.cdiv",
+            "triton.language",
+            "triton.language.arange",
+            "triton.language.load",
+            "triton.language.program_id",
+            "triton.language.sqrt",
+            "triton.language.store",
+            "triton.language.sum",
+            "triton.next_power_of_2"
+          ],
+          "libraries": [
+            "lightop",
+            "torch",
+            "triton"
+          ],
+          "numbers": [],
+          "files_scanned": [
+            "report.md",
+            "scripts/bench.py",
+            "scripts/bench_lightop.py",
+            "scripts/ceiling.py",
+            "scripts/fused_kernel.py"
+          ]
+        }
+      },
+      "leaks": {},
+      "leaked": false
+    },
+    "moe-gating-l1/B": {
+      "task": "moe-gating-l1",
+      "arm": "B",
+      "status": "ok",
+      "wall_time_s": 286.5,
+      "tokens": 8547,
+      "artifacts": 4,
+      "has_report": true,
+      "effective": true,
+      "effective_why": "有命令 + 数字/原始输出",
+      "judged": null,
+      "judged_why": null,
+      "halluc_rate": 0.05555555555555555,
+      "halluc": {
+        "checked": 18,
+        "failed": [
+          [
+            "values.cpu",
+            "无法导入 values.cpu 的任何前缀模块"
+          ]
+        ],
+        "rate": 0.05555555555555555,
+        "claims": {
+          "import_paths": [
+            "json.dump",
+            "os.makedirs",
+            "sgl_kernel.topk_softmax",
+            "torch.cuda.Event",
+            "torch.cuda.get_device_name",
+            "torch.cuda.synchronize",
+            "torch.empty",
+            "torch.equal",
+            "torch.randn",
+            "torch.softmax",
+            "torch.topk",
+            "torch.zeros",
+            "values.cpu"
+          ],
+          "libraries": [
+            "aiter",
+            "lightop",
+            "sgl_kernel",
+            "sglang",
+            "torch"
+          ],
+          "numbers": [],
+          "files_scanned": [
+            "report.md",
+            "scripts/bench_gating.py"
+          ]
+        }
+      },
+      "leaks": {},
+      "leaked": false
+    },
+    "norm-fused-add-rmsnorm-l1/B": {
+      "task": "norm-fused-add-rmsnorm-l1",
+      "arm": "B",
+      "status": "ok",
+      "wall_time_s": 705.1,
+      "tokens": 24946,
+      "artifacts": 10,
+      "has_report": true,
+      "effective": true,
+      "effective_why": "有命令 + 数字/原始输出",
+      "judged": null,
+      "judged_why": null,
+      "halluc_rate": 0.0,
+      "halluc": {
+        "checked": 20,
+        "failed": [],
+        "rate": 0.0,
+        "claims": {
+          "import_paths": [
+            "aiter.rms_norm_cu",
+            "argparse.ArgumentParser",
+            "importlib.metadata",
+            "importlib.metadata.version",
+            "json.dump",
+            "os.makedirs",
+            "statistics.median",
+            "statistics.quantiles",
+            "torch.Generator",
+            "torch.add",
+            "torch.cuda.Event",
+            "torch.cuda.empty_cache",
+            "torch.cuda.get_device_capability",
+            "torch.cuda.get_device_name",
+            "torch.cuda.synchronize",
+            "torch.empty",
+            "torch.empty_like",
+            "torch.randn"
+          ],
+          "libraries": [
+            "aiter",
+            "torch"
+          ],
+          "numbers": [],
+          "files_scanned": [
+            "report.md",
+            "scripts/bench_fused_add_rmsnorm.py",
+            "scripts/bench_unfused_baseline.py",
+            "scripts/peak_bw.py"
+          ]
+        }
+      },
+      "leaks": {},
+      "leaked": false
+    },
+    "moe-gating-l1/C": {
+      "task": "moe-gating-l1",
+      "arm": "C",
+      "status": "ok",
+      "wall_time_s": 459.3,
+      "tokens": 14942,
+      "artifacts": 5,
+      "has_report": true,
+      "effective": true,
+      "effective_why": "有命令 + 数字/原始输出",
+      "judged": null,
+      "judged_why": null,
+      "halluc_rate": 0.05,
+      "halluc": {
+        "checked": 20,
+        "failed": [
+          [
+            "prof.key_averages",
+            "无法导入 prof.key_averages 的任何前缀模块"
+          ]
+        ],
+        "rate": 0.05,
+        "claims": {
+          "import_paths": [
+            "aiter.moe_c_topk_softmax",
+            "importlib.metadata",
+            "json.dump",
+            "prof.key_averages",
+            "sgl_kernel.topk_softmax",
+            "torch.cuda.Event",
+            "torch.cuda.get_device_name",
+            "torch.cuda.init",
+            "torch.cuda.synchronize",
+            "torch.empty",
+            "torch.profiler.profile",
+            "torch.randn",
+            "torch.softmax",
+            "torch.topk",
+            "torch.zeros"
+          ],
+          "libraries": [
+            "aiter",
+            "lightop",
+            "sgl_kernel",
+            "torch",
+            "triton"
+          ],
+          "numbers": [],
+          "files_scanned": [
+            "report.md",
+            "scripts/bench_moe_gating.py"
+          ]
+        }
+      },
+      "leaks": {},
+      "leaked": false
+    },
+    "norm-fused-add-rmsnorm-l1/C": {
+      "task": "norm-fused-add-rmsnorm-l1",
+      "arm": "C",
+      "status": "ok",
+      "wall_time_s": 1247.6,
+      "tokens": 63823,
+      "artifacts": 5,
+      "has_report": true,
+      "effective": true,
+      "effective_why": "有命令 + 数字/原始输出",
+      "judged": null,
+      "judged_why": null,
+      "halluc_rate": 0.0,
+      "halluc": {
+        "checked": 23,
+        "failed": [],
+        "rate": 0.0,
+        "claims": {
+          "import_paths": [
+            "json.dump",
+            "lightop.RMSNormAdd",
+            "lightop.fused_add_rms_norm",
+            "os.path.abspath",
+            "os.path.dirname",
+            "os.path.join",
+            "os.path.normpath",
+            "torch.cuda.Event",
+            "torch.cuda.empty_cache",
+            "torch.cuda.get_device_name",
+            "torch.cuda.get_device_properties",
+            "torch.cuda.synchronize",
+            "torch.empty",
+            "torch.empty_like",
+            "torch.manual_seed",
+            "torch.nn.functional",
+            "torch.nn.functional.rms_norm",
+            "torch.ones",
+            "torch.randn",
+            "torch.sqrt"
+          ],
+          "libraries": [
+            "aiter",
+            "lightop",
+            "torch"
+          ],
+          "numbers": [],
+          "files_scanned": [
+            "report.md",
+            "scripts/bench_fused_add_rmsnorm.py"
+          ]
+        }
+      },
+      "leaks": {},
+      "leaked": false
+    }
+  }
+}

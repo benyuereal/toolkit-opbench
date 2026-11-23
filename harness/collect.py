@@ -225,23 +225,35 @@ def leak_hits(attempt_dir: str) -> dict[str, list[str]]:
     return leak.scan_dir(attempt_dir)
 
 
-def collect(runs_dir: str, isolated_root: str | None = None) -> dict:
+def collect(runs_dir: str, isolated_root: str | None = None,
+            only_tasks: list[str] | None = None) -> dict:
     """扫 runs/，返回 {tasks: [...], arms: [...], table: {(task,arm): row}, deltas}
 
     `isolated_root` 传给 `_candidate_roots`；测试传空串可只扫给定目录，
     避免被本机 /tmp/opbench-run 的真实运行干扰。
+
+    `only_tasks` 限定要汇报的题集。**必须传**：runs/ 里累积了历史评测的
+    单元（gemm 的 timeout、l5、judge 的失败），全扫进报告会污染 Δ——
+    之前 A 臂被算成"6 题"就是因为它目录里有历史残留。报告应该只反映
+    "这次评测的题"。
     """
     # 先列出所有出现过任务的目录名（各臂可能只跑了一部分）
-    tasks: list[str] = []
+    all_tasks: list[str] = []
     for arm in ARMS:
         for task_id, _ in _attempt_dirs(runs_dir, arm, isolated_root):
-            if task_id not in tasks:
-                tasks.append(task_id)
-    tasks.sort()
+            if task_id not in all_tasks:
+                all_tasks.append(task_id)
+    if only_tasks:
+        keep = set(only_tasks)
+        all_tasks = [t for t in all_tasks if t in keep]
+    tasks = sorted(all_tasks)
 
     table: dict[tuple[str, str], dict] = {}
+    keep = set(only_tasks) if only_tasks else None
     for arm in ARMS:
         for task_id, d in _attempt_dirs(runs_dir, arm, isolated_root):
+            if keep is not None and task_id not in keep:
+                continue
             meta = _load_json(os.path.join(d, "meta.json")) or {}
             report = _read(os.path.join(d, "report.md"))
             artifacts = meta.get("artifacts") or []
@@ -431,8 +443,9 @@ def render_report(table: dict, template: str | None = None) -> str:
 
 
 def write_report(runs_dir: str, out_dir: str,
-                 isolated_root: str | None = None) -> str:
-    data = collect(runs_dir, isolated_root)
+                 isolated_root: str | None = None,
+                 only_tasks: list[str] | None = None) -> str:
+    data = collect(runs_dir, isolated_root, only_tasks=only_tasks)
     text = render_report(data)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "report.md")
@@ -453,9 +466,11 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(prog="opbench-collect")
     p.add_argument("--runs", default="runs")
     p.add_argument("--out", default="reports")
+    p.add_argument("--tasks", nargs="*", default=None,
+                   help="只汇报这些题（不给则扫 runs/ 全部——会把历史评测也算进来）")
     p.add_argument("--print", action="store_true")
     a = p.parse_args()
-    path = write_report(a.runs, a.out)
+    path = write_report(a.runs, a.out, only_tasks=a.tasks)
     if a.print:
         print(open(path, encoding="utf-8").read())
     else:
