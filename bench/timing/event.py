@@ -38,6 +38,21 @@ class Timing:
         return asdict(self)
 
 
+def _events():
+    """在**当前设备**上建一对计时 event。
+
+    必须显式传 device：`torch.cuda.Event()` 默认绑 cuda:0。若被测 kernel
+    在 cuda:1 上跑，event 会记录 cuda:0 队列的时间线，量出荒谬的数
+    （实测 4096³ bf16 报 3527–6211 TF，比 fp8 理论峰值还高 11 倍）。
+    这类错误不会报错，只会给出"太好了"的数字——最容易骗过自己。
+    """
+    import torch
+
+    dev = torch.cuda.current_device()
+    return (torch.cuda.Event(enable_timing=True),
+            torch.cuda.Event(enable_timing=True))
+
+
 def _sclk() -> int | None:
     try:
         from bench.hw import dcu
@@ -80,8 +95,7 @@ def time_call(fn: Callable[[], None], warmup: int = 10, iters: int = 50,
         # 顺序不可换：flush → record → fn → record。
         # flush 之后到 start.record() 之间不能再碰显存。
         flush_mod.flush(nbytes)
-        s = torch.cuda.Event(enable_timing=True)
-        e = torch.cuda.Event(enable_timing=True)
+        s, e = _events()
         s.record()
         fn()
         e.record()
@@ -92,8 +106,16 @@ def time_call(fn: Callable[[], None], warmup: int = 10, iters: int = 50,
 
     sclk_end = _sclk()
     med = statistics.median(samples)
+    # 跨设备 event 的典型症状是"太快"（数倍到数十倍）。这里给一条
+    # 粗筛：同一 kernel 的 50 次中位数若比最小值大一倍以上，说明
+    # 队列被别的东西占着；若比 0.1 µs 还小，基本是计的错设备。
+    if med > 0 and med < 1e-4:
+        note_pre = (f"median={med:.3g} ms 小于 0.1 µs，几乎肯定是计的错设备"
+                    "（Event 默认绑 cuda:0）或 kernel 未真正执行")
+    else:
+        note_pre = ""
     mad = statistics.median([abs(x - med) for x in samples])
-    note = ""
+    note = note_pre
     if med <= 0:
         note = "median <= 0：计时无效（异步未同步，或 kernel 没真正执行）"
     if sclk_start is not None and sclk_end is not None and sclk_start != sclk_end:
@@ -142,8 +164,7 @@ def time_many(fns: dict[str, Callable], warmup: int = 10, iters: int = 50,
     for _ in range(iters):
         for name, fn in fns.items():
             flush_mod.flush(nbytes)
-            s = torch.cuda.Event(enable_timing=True)
-            e = torch.cuda.Event(enable_timing=True)
+            s, e = _events()
             s.record()
             fn()
             e.record()
