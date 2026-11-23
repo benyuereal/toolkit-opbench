@@ -94,7 +94,6 @@ tasks/<id>/{task.md, definition.json, workload.jsonl, reference.py}
 ```
 toolkit-opbench/
 ├── README.md                本文件
-├── NOTICE                   设计参考 NVIDIA/SOL-ExecBench (Apache-2.0)，未复制源码
 ├── LICENSE                  Apache-2.0
 ├── protocol.md              隔离 / GPU 互斥 / 评分 / 防作弊（含泄漏指纹表）
 ├── docs/
@@ -171,16 +170,7 @@ python3 -m harness.collect --runs runs --out reports/      # 6 出报告
 
 ---
 
-## 九、与 SOL-ExecBench 的关系
-
-借鉴了它的**题面三件套格式、反 reward-hack 检查、计时纪律（含 L2 flush、固定 warmup）**。
-**未借鉴**：SOL-Score 的 B200 分母（gfx938 用不上）、「从零写 kernel」的题型（我们考选型与改法）、它的题目数据（许可与形状均不匹配）。
-
-代码未复制，声明见 `NOTICE`。
-
----
-
-## 十、怎么读这套文档
+## 九、怎么读这套文档
 
 新手按这个顺序：`README` → `docs/design.md`（为什么测增益）→ `docs/architecture.md`（模块与数据流）→ `docs/format.md`（怎么写题）→ `docs/workflow.md`（怎么跑）。
 

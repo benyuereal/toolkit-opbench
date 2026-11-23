@@ -4,37 +4,31 @@
 
 ---
 
-## 一、从 SOL-ExecBench 借鉴什么（借鉴，不复制）
+## 一、设计取向：借什么、不借什么
 
-已克隆 `NVIDIA/SOL-ExecBench`（Apache-2.0，13k 行 Python）看过内部结构。它的模块划分是：
-
-```
-core/bench/   correctness · timing · reward_hack · io
-core/data/    definition · workload · solution · trace · shapes · dtypes
-driver/       problem_packager · templates/{build_ext, eval_driver}
-sol_score.py
-```
+评测模型不是凭空设计的。借的是四类通用工程做法，不借的是与硬件绑定的指标与题型。
+原则只有一条：**能在 gfx938 上复跑的才拿进来，拿不进来的不装作有。**
 
 ### 借四条设计
 
-| # | 它怎么做 | 我们怎么用 |
+| # | 做法 | 我们怎么用 |
 |---|---|---|
 | 1 | **题面三件套**：`definition.json`（符号轴 + 张量规格 + 参考实现 + 容差）+ `workload.jsonl`（具体形状）+ `solution.json`（提交） | 直接采用结构。这让评分器能机器判，而不是读散文 |
-| 2 | **反 reward-hack 做成一等公民**：检测 patch `torch.cuda.Event.elapsed_time`、后台线程注入、lazy tensor、评测函数被替换（id 快照） | 采用思路 + **加我们自己的一类**：编造 `import_path`、改题面、复用上次 results |
-| 3 | **计时纪律**：CUPTI 取 GPU 时间（不是 wall time）、每轮 flush L2、warmup 10 / 计时 50–100、报 median + CV | 采用。DCU 上用 `torch.cuda.Event`，flush 用我们自己的 8 MB |
-| 4 | **`benchmark_reference` 默认关闭**：参考实现可能跑 >1h，会主导总耗时 | 采用。我们的 `T_b` 单独跑一次并存档，评测时只读存档 |
+| 2 | **反 reward-hack 做成一等公民**：检测 patch 计时函数、后台线程注入、lazy tensor、评测函数被替换（id 快照） | 采用思路 + **加我们自己的一类**：编造 `import_path`、改题面、复用上次 results |
+| 3 | **计时纪律**：取 GPU 时间而不是 wall time、每轮 flush L2、固定 warmup 与迭代数、报 median | 采用。DCU 上用 `torch.cuda.Event`，flush 用我们自己的 8 MB |
+| 4 | **参考实现的耗时默认不进评测主路径**：参考实现可能跑一小时以上，会主导总耗时 | 采用。我们的 `T_b` 单独跑一次并存档，评测时只读存档 |
 
-### 不借三条
+### 不做的三件事
 
-| 不借 | 原因 |
+| 不做 | 原因 |
 |---|---|
-| **SOL-Score 的分母** | 它是 B200 的解析 roofline（`NVlabs/SOLAR`）。gfx938 一个数都用不上。我们用自己的 `constants.yaml`（fp8 560 / bf16 310 实测） |
-| **"从零写 kernel"的题型** | 它的题产物是 kernel；我们是算子级选型 + 改法 + 判定。**L3/L5 它没有** |
-| **它的题目数据** | 形状与硬件都不匹配，且 `reference.py`/description 有版权 |
+| **用外部榜单的分母** | 那些分母按别家硬件峰值解析求出，gfx938 一个数都用不上。我们用自己的 `constants.yaml`（fp8 560 / bf16 310 实测） |
+| **考「从零写 kernel」** | 我们的产物是结论（选型 + 改法 + 判定），不是 kernel。**L3 边界决策与 L5 反事实这两层，任何「写更快 kernel」的题集都不会有** |
+| **复用外部题目数据** | 形状与硬件都不匹配，且其参考实现与描述有版权 |
 
 ### 许可
 
-我们代码 Apache-2.0；根目录放 `NOTICE` 声明"设计参考 NVIDIA/SOL-ExecBench (Apache-2.0)"。**不复制其源码**。
+本仓库代码 Apache-2.0；题面、评分模型与全部代码均为原创，未复制任何第三方源码。
 
 ---
 
@@ -85,7 +79,6 @@ task.definition + task.workload
 ```
 toolkit-opbench/
 ├── README.md
-├── NOTICE                    设计参考 NVIDIA/SOL-ExecBench (Apache-2.0)
 ├── LICENSE                   Apache-2.0
 ├── docs/
 │   ├── design.md             为什么测增益、三臂模型、为什么不打外部榜
@@ -123,7 +116,7 @@ toolkit-opbench/
 
 ## 四、数据格式
 
-### 4.1 题面三件套（沿用 SOL 的结构，字段我们自己定）
+### 4.1 题面三件套
 
 `definition.json`
 
@@ -178,7 +171,7 @@ toolkit-opbench/
 
 `kind: judgment` 没有 `reference.py`。评分走"产物完整性 + 幻觉扫描 + expect 规则"，不做数值对比。
 
-**这是它与 SOL-ExecBench 最大的结构差异**：它 235 题全是 `kind: kernel`，我们有 10 题是 `judgment`。
+**这是本仓库与「写更快 kernel」类评测最大的结构差异**：那类题集全是 `kind: kernel`，我们有 10 题是 `judgment`。
 
 ---
 

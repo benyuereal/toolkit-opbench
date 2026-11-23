@@ -10,7 +10,7 @@
 #   python3 -c "import torch; print(torch.__version__, torch.version.hip)"
 #
 # 需要 GPU 的部分（不属于 pip 依赖，说明在此避免误装）：
-#   - claude CLI（被测 agent）：/opt/openbench-node/bin/claude 或 nvm 下的 claude
+#   - claude CLI（被测 agent）：/opt/opbench-node/bin/claude 或 nvm 下的 claude
 #   - hy-smi（时钟与占用查询）
 #
 # 单测依赖（可选，仅开发时）
