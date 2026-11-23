@@ -438,3 +438,77 @@ class TestClaimsExtraction(unittest.TestCase):
 
         ok, why = H.verify_import_path("json.decoder")
         self.assertTrue(ok, why)
+
+
+class TestAnswerIsolation(unittest.TestCase):
+    """A 臂读不到答案，是实验前提，不是加固项。"""
+
+    def test_expect_md_not_world_readable(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for task in sorted(os.listdir(os.path.join(root, "tasks"))):
+            if task.startswith("_"):
+                continue
+            p = os.path.join(root, "tasks", task, "expect.md")
+            if not os.path.isfile(p):
+                continue
+            mode = os.stat(p).st_mode & 0o777
+            self.assertEqual(mode & 0o004, 0, f"{p} 对 others 可读：A 臂能抄答案")
+
+    def test_definition_not_world_readable(self):
+        """definition.json 含 expected_verdict / verdict_keywords，等同答案。"""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for task in sorted(os.listdir(os.path.join(root, "tasks"))):
+            if task.startswith("_"):
+                continue          # _TEMPLATE 不是真题，没有答案可泄
+            p = os.path.join(root, "tasks", task, "definition.json")
+            if not os.path.isfile(p):
+                continue
+            mode = os.stat(p).st_mode & 0o777
+            self.assertEqual(mode & 0o004, 0, f"{p} 对 others 可读：A 臂能读到答案口径")
+
+    def test_answer_fingerprints_catch_copied_verdict(self):
+        from bench.check import leak
+
+        text = "- expected_verdict: unavailable\n- verdict_keywords: [...]"
+        hits = leak.scan_answer_leak(text)
+        self.assertIn("expected_verdict", hits)
+        self.assertIn("verdict_keywords", hits)
+
+    def test_normal_answer_not_flagged(self):
+        from bench.check import leak
+
+        self.assertEqual(leak.scan_answer_leak("不可用，dtype 被拒，报错原文如下"), [])
+
+    def test_isolated_cwd_outside_repo(self):
+        import tempfile
+        from harness import run
+
+        with unittest.mock.patch.object(run, "ISOLATED_ROOT", tempfile.mkdtemp()):
+            p = run.isolated_cwd("t1", "A", dry_run=True)
+        self.assertFalse(p.startswith(run.ROOT))
+        self.assertTrue(os.path.isdir(p))
+
+    def test_guard_refuses_when_readable(self):
+        import tempfile
+        from harness import run
+
+        d = tempfile.mkdtemp()
+        with open(os.path.join(d, "expect.md"), "w", encoding="utf-8") as f:
+            f.write("答案")
+        os.chmod(os.path.join(d, "expect.md"), 0o644)
+        # 守卫内部用 `su - opbench -c "test -r ..."`；这里模拟"读得到"
+        def fake_run(cmd, **kw):
+            class R:
+                returncode = 0
+            return R()
+
+        with unittest.mock.patch.object(run, "task_dir", return_value=d), \
+             unittest.mock.patch.object(run, "ROOT", d), \
+             unittest.mock.patch.object(run.subprocess, "run", side_effect=fake_run):
+            with self.assertRaises(PermissionError):
+                run.guard_answer_readable("t1", "A")
+
+    def test_guard_skips_non_isolated_arm(self):
+        from harness import run
+
+        run.guard_answer_readable("moe-asm-fmoe-l5", "C")  # 不应抛

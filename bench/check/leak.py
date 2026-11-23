@@ -18,6 +18,31 @@ FINGERPRINTS = [
     "560 TF", "49.8 TF",
 ]
 
+# 第二类指纹：**题面本身没有、只在答案侧文件里出现**的字符串。
+# 前一类抓"偷看 skill"，这一类抓"偷看 expect.md / definition.json"。
+# 为什么必须单列：A 臂的 cwd 在外层仓库里，仓库对 opbench 用户可读
+# （实测 expect.md 644），所以"读到答案"在文件系统层面是可能的；
+# 而答案是自然语言，抄了结论不会有任何函数名之类的痕迹。
+# 这里用的是**答案侧独有**的措辞，不是题面词——避免把正常回答判成泄漏。
+ANSWER_FINGERPRINTS = [
+    "expected_verdict",
+    "verdict_keywords",
+    "forbidden_claims",
+    "evidence_required",
+    "参考答案",          # expect.md 的标题
+    "不给 agent 看",
+    "修正记录",
+]
+
+
+def scan_answer_leak(text: str) -> list[str]:
+    """检测"答案侧独有"的痕迹。与 scan() 分开，因为两者含义不同：
+    命中 scan() = 偷看 skill/我们的标定；命中本函数 = 偷看 expect/definition。
+    两者都作废该单元，但报告里要分开写。"""
+    if not text:
+        return []
+    return [fp for fp in ANSWER_FINGERPRINTS if fp in text]
+
 # 扫描范围：只扫文本类产物。二进制/张量文件扫了只会误报。
 TEXT_EXTS = (".md", ".txt", ".json", ".jsonl", ".py", ".sh", ".log", ".yaml", ".yml")
 
@@ -46,7 +71,7 @@ def scan_dir(path: str) -> dict[str, list[str]]:
                     text = f.read()
             except OSError:
                 continue
-            found = scan(text)
+            found = scan(text) + scan_answer_leak(text)
             if found:
                 hits[os.path.relpath(p, path)] = found
     return hits

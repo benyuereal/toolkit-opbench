@@ -144,6 +144,65 @@ def prepare_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
     return cwd
 
 
+# A 臂的 cwd 必须搬到仓库之外：cwd 在仓库内时，agent 顺着 `..` 就能
+# 读到 expect.md（答案）、definition.json（含 expected_verdict）、
+# 以及 B/C 臂的产物。实测 opbench 用户对仓库全部可读。
+ISOLATED_ROOT = "/tmp/opbench-run"
+
+
+def isolated_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
+    """A 臂用：仓库之外的 cwd。语义与 prepare_cwd 一致（attempt-N、dry-run）。"""
+    if dry_run:
+        cwd = os.path.join(ISOLATED_ROOT, f"arm-{arm.upper()}", task_id, "_dry-run")
+        os.makedirs(cwd, exist_ok=True)
+        os.chmod(cwd, 0o777)
+        return cwd
+    base = os.path.join(ISOLATED_ROOT, f"arm-{arm.upper()}", task_id)
+    os.makedirs(base, exist_ok=True)
+    n, cwd = _next_attempt(base)
+    os.makedirs(cwd)
+    os.chmod(cwd, 0o777)
+    return cwd
+
+
+def _isolated_arm(arm: str) -> bool:
+    """有独立用户就说明这条臂要隔离（当前只有 A）。"""
+    return bool(getattr(_arm_module(arm), "USER", None))
+
+
+def guard_answer_readable(task_id: str, arm: str) -> None:
+    """跑之前先确认：这条臂**读不到**答案侧文件。
+
+    这不是"防小人"的加固，而是**实验前提**：能读到答案的臂不能被当成
+    基线。与其事后靠指纹猜它有没有看，不如开跑前就确认它看不到。
+    读得到就直接拒绝——把问题暴露在数据产生之前。
+    """
+    if not _isolated_arm(arm):
+        return
+    from harness.arms.a import USER
+
+    targets = [
+        os.path.join(task_dir(task_id), "expect.md"),
+        os.path.join(task_dir(task_id), "definition.json"),
+    ]
+    readable = []
+    for p in targets:
+        if not os.path.isfile(p):
+            continue
+        probe = f'test -r {_quote_for_shell([p])}'
+        r = subprocess.run(["su", "-", USER, "-c", probe], capture_output=True)
+        if r.returncode == 0:
+            readable.append(os.path.relpath(p, ROOT))
+    if readable:
+        raise PermissionError(
+            f"{arm} 臂能读到 {readable}。这是实验前提问题，不是小疏漏："
+            "能读到答案的臂不能当基线。修法（任一）："
+            f"chmod 600 {os.path.relpath(task_dir(task_id), ROOT)}/expect.md "
+            f"与 definition.json；或让 {arm} 臂在仓库外的 cwd 里跑"
+            "（见 harness.run.isolated_cwd）"
+        )
+
+
 def select_attempt(base: str) -> str | None:
     """下游评分只看 attempt-1。没有 attempt-1 就没有这一轮的结果。"""
     first = os.path.join(base, "attempt-1")
@@ -298,7 +357,14 @@ def run_one(task_id: str, arm: str, budget_s: int,
     # 已有臂的预算必须与这一轮一致。dry_run 也检查：先看清再跑。
     assert_arms_comparable(task_id, budget_s, max_usd)
 
-    cwd = prepare_cwd(task_id, arm, dry_run=dry_run)
+    # 先确认这条臂读不到答案，再建目录——把问题挡在数据产生之前。
+    guard_answer_readable(task_id, arm)
+
+    # 有独立用户的臂（A）把 cwd 放到仓库之外，`..` 摸不到 expect.md。
+    if _isolated_arm(arm):
+        cwd = isolated_cwd(task_id, arm, dry_run=dry_run)
+    else:
+        cwd = prepare_cwd(task_id, arm, dry_run=dry_run)
     staged = list(mod.stage_files(cwd) or [])
     mounted = list(mod.mount(cwd) or []) if hasattr(mod, "mount") else []
 
