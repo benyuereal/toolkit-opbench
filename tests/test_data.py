@@ -353,3 +353,30 @@ class TestTrace(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCorrectionLog(unittest.TestCase):
+    """修正记录必须入库且格式可解析——它是审计链的一环。"""
+
+    def test_corrections_log_tracked_and_parsable(self):
+        import subprocess
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(root, "runs", "corrections.log")
+        self.assertTrue(os.path.isfile(path), "runs/corrections.log 必须存在")
+        out = subprocess.run(
+            ["git", "-C", root, "ls-files", "--error-unmatch", "runs/corrections.log"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(out.returncode, 0, "corrections.log 必须被 git 跟踪（不是运行产物）")
+        with open(path, encoding="utf-8") as f:
+            lines = [l for l in f if l.strip() and not l.startswith("#")]
+        # 只有以 ISO 时间开头的行才是条目；其余是说明文字
+        import re
+
+        entries = [l for l in lines if re.match(r"^\d{4}-\d{2}-\d{2}T", l.strip())]
+        self.assertTrue(entries, "至少一条修正记录")
+        for line in entries:
+            parts = line.split("|")
+            self.assertGreaterEqual(len(parts), 5, line)
+            self.assertTrue(parts[1].strip(), "条目必须写题目 id")
