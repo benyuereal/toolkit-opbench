@@ -335,3 +335,45 @@ class TestArms(unittest.TestCase):
              unittest.mock.patch.object(c, "SKILL_ROOT", "/nonexistent/skill"):
             with self.assertRaises(FileNotFoundError):
                 c.mount(d)
+
+
+class TestArmBudgetComparability(unittest.TestCase):
+    """三臂只许差上下文，不许差预算。"""
+
+    def test_mismatched_usd_refused(self):
+        import json as _json
+        import tempfile
+        from harness import run
+
+        runs = tempfile.mkdtemp()
+        d = os.path.join(runs, "arm-A", "t9", "attempt-1")
+        os.makedirs(d)
+        with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+            _json.dump({"budget_s": 1800, "max_usd": 3.0}, f)
+        with unittest.mock.patch.object(run, "RUNS_DIR", runs):
+            with self.assertRaises(ValueError) as ctx:
+                run.assert_arms_comparable("t9", 1800, 5.0)
+            self.assertIn("max_usd", str(ctx.exception))
+            # 一致时不报错
+            self.assertEqual(run.assert_arms_comparable("t9", 1800, 3.0), [])
+
+    def test_mismatched_wall_budget_refused(self):
+        import json as _json
+        import tempfile
+        from harness import run
+
+        runs = tempfile.mkdtemp()
+        d = os.path.join(runs, "arm-B", "t9", "attempt-1")
+        os.makedirs(d)
+        with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+            _json.dump({"budget_s": 600, "max_usd": 3.0}, f)
+        with unittest.mock.patch.object(run, "RUNS_DIR", runs):
+            with self.assertRaises(ValueError):
+                run.assert_arms_comparable("t9", 1800, 3.0)
+
+    def test_no_previous_runs_is_fine(self):
+        import tempfile
+        from harness import run
+
+        with unittest.mock.patch.object(run, "RUNS_DIR", tempfile.mkdtemp()):
+            self.assertEqual(run.assert_arms_comparable("none", 1800, 3.0), [])

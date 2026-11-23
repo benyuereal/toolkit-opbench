@@ -117,7 +117,7 @@ def _next_attempt(base: str) -> tuple[int, str]:
     return n, os.path.join(base, f"attempt-{n}")
 
 
-def prepare_cwd(task_id: str, arm: str) -> str:
+def prepare_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
     """建 runs/<arm>/<task>/attempt-N/ 并 chmod 777。返回 cwd。
 
     目录名一律用 **definition.id**（不是调用时传的名字）。原因：目录名与
@@ -128,7 +128,16 @@ def prepare_cwd(task_id: str, arm: str) -> str:
     attempt-N 而不是直接覆盖：失败样本比成功样本信息量大，但复跑会
     破坏"固定预算"的可比性。所以保留每一次，且下游只认 attempt-1
     （见 select_attempt）——不续跑，但留证据。
+
+    dry_run 落到 `_dry-run/`，**不占 attempt 号**：一次预演若占掉
+    attempt-1，真正的那次就变成 attempt-2、被下游忽略，等于白跑。
     """
+    if dry_run:
+        cwd = os.path.join(RUNS_DIR, f"arm-{arm.upper()}", task_id, "_dry-run")
+        os.makedirs(cwd, exist_ok=True)
+        os.chmod(cwd, 0o777)
+        return cwd
+
     base = os.path.join(RUNS_DIR, f"arm-{arm.upper()}", task_id)
     os.makedirs(base, exist_ok=True)
     n, cwd = _next_attempt(base)
@@ -213,6 +222,57 @@ def stated_budget_s(task_md: str) -> int | None:
     return int(m.group(1)) * 60 if m else None
 
 
+def assert_arms_comparable(task_id: str, budget_s: int, max_usd: float) -> list[str]:
+    """同一道题的已有臂必须与新这一轮用同一组预算，否则拒绝开跑。
+
+    三臂对照的全部意义是"只有上下文不同"。预算（wall time 与美元上限）
+    只要有一项不同，测出来的就是预算差，不是 skill 差——而且这种差异
+    会伪装成结论，比明显报错危险得多。
+    """
+    base = os.path.join(RUNS_DIR)
+    problems = []
+    for arm in ("A", "B", "C"):
+        d = os.path.join(base, f"arm-{arm}", task_id, "attempt-1")
+        meta_path = os.path.join(d, "meta.json")
+        if not os.path.isfile(meta_path):
+            continue
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        prev_budget = meta.get("budget_s")
+        if prev_budget is not None and int(prev_budget) != int(budget_s):
+            problems.append(
+                f"arm-{arm} 用的是 budget={prev_budget}s，这次是 {budget_s}s"
+            )
+        prev_usd = meta.get("max_usd")
+        if meta.get("max_usd_backfilled"):
+            # 事后补录的值：来源写在 max_usd_source 里。仍参与比对，
+            # 但不假装它是运行当时的记录。
+            if prev_usd is not None and abs(float(prev_usd) - float(max_usd)) > 1e-9:
+                problems.append(
+                    f"arm-{arm} 用过 max_usd={prev_usd}（事后补录），这次是 {max_usd}"
+                )
+            continue
+        if prev_usd is None:
+            # 早期记录没有这个字段。不能默认它相等——那等于放过了
+            # "用 5 美元跑 C、用 3 美元跑 A" 这种不可比。
+            problems.append(
+                f"arm-{arm} 的 meta 没有记录 max_usd，无法核对美元上限是否一致"
+            )
+        elif abs(float(prev_usd) - float(max_usd)) > 1e-9:
+            problems.append(
+                f"arm-{arm} 用的是 max_usd={prev_usd}，这次是 {max_usd}"
+            )
+    if problems:
+        raise ValueError(
+            f"{task_id}: 三臂预算不一致，拒绝开跑（{'；'.join(problems)}）。"
+            "要换预算就三臂一起重跑：删掉该题的 runs/arm-*/<task> 再跑"
+        )
+    return problems
+
+
 def run_one(task_id: str, arm: str, budget_s: int,
             max_usd: float = DEFAULT_MAX_USD, dry_run: bool = False) -> dict:
     arm = arm.upper()
@@ -237,7 +297,10 @@ def run_one(task_id: str, arm: str, budget_s: int,
 
     task_md_sha256 = integrity.hash_file(os.path.join(td, "task.md"))
 
-    cwd = prepare_cwd(task_id, arm)
+    # 已有臂的预算必须与这一轮一致。dry_run 也检查：先看清再跑。
+    assert_arms_comparable(task_id, budget_s, max_usd)
+
+    cwd = prepare_cwd(task_id, arm, dry_run=dry_run)
     staged = list(mod.stage_files(cwd) or [])
     mounted = list(mod.mount(cwd) or []) if hasattr(mod, "mount") else []
 
@@ -247,6 +310,7 @@ def run_one(task_id: str, arm: str, budget_s: int,
         "arm": arm,
         "cwd": os.path.relpath(cwd, ROOT),
         "budget_s": budget_s,
+        "max_usd": max_usd,
         "started_at": _now(),
         "task_md_sha256": task_md_sha256,
         "staged": staged,
