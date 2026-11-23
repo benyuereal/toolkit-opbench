@@ -1,0 +1,30 @@
+{
+  "id": "lin-causal-conv1d-l1",
+  "kind": "kernel",
+  "family": "linear-attn",
+  "tier": "L1",
+  "precision": ["bfloat16"],
+  "axes": {
+    "B": {"type": "const", "value": 8},
+    "D": {"type": "const", "value": 2048},
+    "S": {"type": "var", "domain": {"values": [131, 293, 1024]}},
+    "W": {"type": "const", "value": 4}
+  },
+  "inputs": {
+    "x": {"shape": ["B", "D", "S"], "dtype": "bfloat16"},
+    "weight": {"shape": ["D", "W"], "dtype": "bfloat16"}
+  },
+  "outputs": {
+    "out": {"shape": ["B", "D", "S"], "dtype": "bfloat16"}
+  },
+  "tolerance": {"rtol": 0.02, "atol": 0.01},
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:copy",
+    "baseline_impl": "causal_conv1d.causal_conv1d_fn",
+    "work": "4*B*D*S + 2*D*W",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true
+  }
+}
