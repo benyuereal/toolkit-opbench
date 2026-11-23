@@ -44,7 +44,13 @@ RUNS_DIR = os.path.join(ROOT, "runs")
 BASELINES_DIR = os.path.join(ROOT, "baselines")
 TRACE_PATH = os.path.join(RUNS_DIR, "trace.jsonl")
 CLAUDE = "/opt/opbench-node/bin/claude"
-ENV_FILE = "/workspace/opendesign.env"
+# 被测 agent 连 API 用的环境文件。默认 opendesign.env；模型换端点时用
+# OPBENCH_ENV 覆盖（例如 qwen 走 tosc.env）。**三臂必须用同一个**，
+# 否则测出来的差是模型差，不是 skill 差。
+ENV_FILE = os.environ.get("OPBENCH_ENV", "/workspace/opendesign.env")
+# 某些端点（qwen 的 OpenCode 网关）只接受有限的 reasoning effort 档位，
+# CLI 默认的 high 会被 400 拒掉。用 OPBENCH_EFFORT 传，空则不传该 flag。
+EFFORT = os.environ.get("OPBENCH_EFFORT", "")
 
 # 三臂共用的工具白名单。改它等于改实验条件，三臂必须同步。
 ALLOWED_TOOLS = ("Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite")
@@ -221,14 +227,23 @@ def select_attempt(base: str) -> str | None:
 
 
 def build_cmd(task_dir: str, budget_s: int, max_usd: float = DEFAULT_MAX_USD) -> list[str]:
-    """组命令。prompt 由 stdin 给，所以这里不含题面。"""
-    return [
+    """组命令。prompt 由 stdin 给，所以这里不含题面。
+
+    模型与 effort 从 OPBENCH_* 环境变量取（见模块顶部），三臂一致。
+    """
+    cmd = [
         CLAUDE,
         "-p",
         "--output-format", "json",
         "--allowedTools", *ALLOWED_TOOLS,
         "--max-budget-usd", f"{max_usd:.2f}",
     ]
+    if EFFORT:
+        cmd += ["--effort", EFFORT]
+    model = os.environ.get("OPBENCH_MODEL", "")
+    if model:
+        cmd += ["--model", model]
+    return cmd
 
 
 def _load_env() -> dict:
@@ -417,35 +432,53 @@ def run_one(task_id: str, arm: str, budget_s: int,
         return record
 
     # ---- GPU 段：持锁 + 空闲检查 + ramp（只有需要 GPU 的题）----
+    pinned = os.environ.get("OPBENCH_DEVICE", "")  # 单卡绑定时由调度器设
     if record["needs_gpu"]:
         from bench.hw import dcu
 
-        # 等锁：并行的 agent 会短暂持锁建基线。wait_s=0 会把这种
-        # 几秒钟的碰撞当成"这轮没跑成"，白丢一个样本。
-        # 等 15 分钟够任何一次 baseline 跑完；真的被长任务占着才放弃。
-        with dcu.gpu_lock(wait_s=900, poll_s=10) as lock:
-            if not lock["acquired"]:
-                record["status"] = "gpu_locked"
-                record["note"] = (f"等了 {lock.get('waited_s')}s 仍被持有"
-                                  f"（holder pid={lock.get('holder_pid')}），本轮不跑")
-                _write_attempt_meta(cwd, record, prompt)
-                return record
-            # 挑一张空闲卡并绑上去，而不是"有一张忙就整轮放弃"。
-            # 8 张卡里通常只有一两张被别的会话占着——死等浪费 6 张。
-            # 三臂都用同一张卡（free[0]）就保持了可比性。
-            dev = dcu.pick_device()
-            if dev is None:
-                record["status"] = "gpu_busy"
-                record["note"] = f"没有空闲卡：{dcu._busy_pcts()}"
-                _write_attempt_meta(cwd, record, prompt)
-                return record
-            record["device"] = dev
-            env_dev = os.environ.get("HIP_VISIBLE_DEVICES")
-            record["gpu_visible_env"] = env_dev
-            record["sclk_mhz"] = dcu.ramp_to_work_clock()
-            record["status"], record["exit_code"], record["wall_time_s"] = _execute(
-                cwd, prompt, arm, budget_s, max_usd, record
-            )
+        if pinned:
+            # 绑卡并行模式：调度器已经把这个进程用 CUDA_VISIBLE_DEVICES
+            # 绑到一张它认为空闲的卡上。此时 hy-smi 仍报告全部 8 张卡，
+            # is_busy()/pick_device() 会看到别的卡忙而误判"整机忙"。
+            # 所以这里只做 ramp + 记录，把"这台绑定的卡忙不忙"交给调用方
+            # （它选卡时已查过）。锁仍然要拿——同一张卡上不许两个单元叠。
+            # 每卡一把锁：同一张卡上不许叠两个单元，但不同卡可以并行。
+            with dcu.gpu_lock(path=f"/tmp/opbench-gpu-card{pinned}.lock",
+                              wait_s=900, poll_s=10) as lock:
+                if not lock["acquired"]:
+                    record["status"] = "gpu_locked"
+                    record["note"] = (f"绑卡 {pinned} 但该卡锁被占"
+                                      f"（holder pid={lock.get('holder_pid')}），本轮不跑")
+                    _write_attempt_meta(cwd, record, prompt)
+                    return record
+                record["device"] = int(pinned)
+                record["pinned"] = True
+                record["gpu_visible_env"] = os.environ.get("CUDA_VISIBLE_DEVICES")
+                record["sclk_mhz"] = dcu.ramp_to_work_clock()
+                record["status"], record["exit_code"], record["wall_time_s"] = _execute(
+                    cwd, prompt, arm, budget_s, max_usd, record
+                )
+        else:
+            # 串行模式：等锁 + 挑空闲卡（原逻辑）
+            with dcu.gpu_lock(wait_s=900, poll_s=10) as lock:
+                if not lock["acquired"]:
+                    record["status"] = "gpu_locked"
+                    record["note"] = (f"等了 {lock.get('waited_s')}s 仍被持有"
+                                      f"（holder pid={lock.get('holder_pid')}），本轮不跑")
+                    _write_attempt_meta(cwd, record, prompt)
+                    return record
+                dev = dcu.pick_device()
+                if dev is None:
+                    record["status"] = "gpu_busy"
+                    record["note"] = f"没有空闲卡：{dcu._busy_pcts()}"
+                    _write_attempt_meta(cwd, record, prompt)
+                    return record
+                record["device"] = dev
+                record["gpu_visible_env"] = os.environ.get("HIP_VISIBLE_DEVICES")
+                record["sclk_mhz"] = dcu.ramp_to_work_clock()
+                record["status"], record["exit_code"], record["wall_time_s"] = _execute(
+                    cwd, prompt, arm, budget_s, max_usd, record
+                )
             record["sclk_end_mhz"] = dcu.current_sclk()
     else:
         record["status"], record["exit_code"], record["wall_time_s"] = _execute(
