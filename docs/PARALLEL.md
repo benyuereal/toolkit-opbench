@@ -16,7 +16,11 @@
 
 | 角色 | 写范围 | 状态 |
 |---|---|---|
-| **主线程** | `harness/**`、`suites/**`、`docs/**`、`README.md`、`reports/**` | 进行中 |
+| **主线程** | `harness/**`、`suites/**`、`docs/**`、`README.md`、`reports/**`、`bench/**` | 进行中 |
+| **agent-attn** | `tasks/attn-paged-decode-l1/**`、`baselines/attn-paged-decode-l1.json` | 启动 |
+| **agent-kv** | `tasks/kv-paged-write-l1/**`、`baselines/kv-paged-write-l1.json` | 启动 |
+| **agent-linear** | `tasks/lin-causal-conv1d-l1/**`、`baselines/lin-causal-conv1d-l1.json` | 启动 |
+| **agent-head** | `tasks/head-lm-sampling-l1/**`、`baselines/head-lm-sampling-l1.json` | 启动 |
 | ~~agent-gemm~~ | 已由主线程完成（子 agent 因网关 524 超时终止） | ✅ 完成 |
 | ~~agent-rmsnorm~~ | 已由主线程完成（同上） | ✅ 完成 |
 | ~~agent-cli~~ | 已由主线程完成 | ✅ 完成 |
