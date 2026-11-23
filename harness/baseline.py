@@ -53,6 +53,18 @@ def _inplace_inputs(defn) -> list[str]:
     return list((defn.dcu or {}).get("inplace_inputs") or [])
 
 
+def _call_args(fn, tensors: dict, defn) -> list:
+    """构造调用参数：张量按 inputs 键序，再补 definition.dcu.extra_args。
+
+    有些算子的签名里有标量参数（`variance_epsilon`、`eps`），它们不是张量，
+    不该出现在 inputs 里（也不该被 build_inputs 造出来）。用 extra_args
+    按位置补上，避免在 baseline 里硬编码某个算子的参数表。
+    """
+    args = [tensors[k] for k in defn.inputs]
+    args.extend((defn.dcu or {}).get("extra_args") or [])
+    return args
+
+
 def _call_impl(fn, tensors: dict, defn, copies: dict | None = None) -> None:
     """把 build_inputs 造的张量按 definition.inputs 的键序喂进去。
 
@@ -63,38 +75,50 @@ def _call_impl(fn, tensors: dict, defn, copies: dict | None = None) -> None:
     计时窗口之外**（调用方在 fn 里做，见 _make_callable），否则量到的是
     拷贝而不是算子。
     """
-    args = [tensors[k] for k in defn.inputs]
-    fn(*args)
+    fn(*_call_args(fn, tensors, defn))
+
+
+INPLACE_BUFFERS = 8
 
 
 def _make_callable(impl, tensors: dict, defn):
     """构造每轮可安全重复调用的闭包。
 
-    原地改写型：每轮先把**副本**填回去（`copy_`），再调用。
-      * `copy_` 是 device-to-device 拷贝，对 268MB 是几十 µs 量级，
-        会污染小算子的测量——所以只对声明了 inplace_inputs 的题启用。
-      * 它确实会抬高 T_b。这是**有意接受的偏差**：比起测出一个错误的数，
-        宁可在报告里注明"含恢复拷贝开销"。
     非原地型：直接调用。
+
+    原地改写型：**轮换 N 份独立 buffer**，每轮用下一份。
+      为什么不用 `copy_` 恢复：每轮往里拷 2×M×H 字节本身就是被测量的一部分。
+      实测 M=8192 时 reset 版 0.43 ms、轮换版 0.214 ms —— 差一倍，
+      而且"296 MB / 0.43 ms"算出来的达成率只有 624 GB/s，
+      会得出"还有一倍空间"的错误结论。
+      为什么不用同一份反复调：原地改写会累加，第 2 轮起输入已经变了，
+      耗时会漂（实测同 buffer 连调 0.196 ms，比两次纯 copy 还快，
+      说明某些轮次根本没做完整流量）。
+      轮换 buffer 两个问题都没有：每轮都是干净输入，且不引入额外拷贝。
     """
     inplace = _inplace_inputs(defn)
     if not inplace:
         def call():
-            args = [tensors[k] for k in defn.inputs]
-            impl(*args)
+            impl(*_call_args(impl, tensors, defn))
         return call
 
-    # 原始副本（只在构造时拷一次）与工作区（每轮恢复用）
-    originals = {k: tensors[k].clone() for k in inplace}
     for k in inplace:
         if k not in tensors:
             raise ValueError(f"inplace_inputs 里的 {k!r} 不在 definition.inputs 里")
 
+    # N 份独立 buffer，只拷一次；每轮用下一份
+    bufs = [{**tensors}, ]
+    for _ in range(INPLACE_BUFFERS - 1):
+        bufs.append({
+            k: (v if k not in inplace else v.clone())
+            for k, v in tensors.items()
+        })
+    state = {"i": 0}
+
     def call():
-        for k in inplace:
-            tensors[k].copy_(originals[k])
-        args = [tensors[k] for k in defn.inputs]
-        impl(*args)
+        cur = bufs[state["i"] % INPLACE_BUFFERS]
+        state["i"] += 1
+        impl(*_call_args(impl, cur, defn))
 
     return call
 

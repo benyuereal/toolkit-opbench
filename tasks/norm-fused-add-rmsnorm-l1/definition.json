@@ -75,6 +75,9 @@
     "work": "4*M*H*2",
     "work_unit": "byte",
     "min_l2_flush_mb": 16,
-    "needs_gpu": true
+    "needs_gpu": true,
+    "extra_args": [
+      1e-06
+    ]
   }
 }
