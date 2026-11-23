@@ -156,17 +156,31 @@ python3 -m harness.collect --runs runs --out reports/      # 6 出报告
 
 ---
 
-## 八、当前状态（2026-11-23 10:30）
+## 八、当前状态（2026-11-23 13:30）
 
 | 模块 | 状态 |
 |---|---|
 | 目录 / 规范 / 题面模板 / suites | ✅ 已就位 |
 | `bench/score/*`（ratio / sol_like / judgment / calibrate） | ✅ 已实现 + 单测 |
-| `bench/data` · `bench/hw` · `bench/timing` · `bench/check` | 🚧 带签名的桩 |
-| `harness/*`（doctor / run / collect / arms） | 🚧 带签名的桩 |
+| `bench/data` · `bench/hw` · `bench/timing` · `bench/check` | ✅ 已实现 + 单测 |
+| `harness/*`（doctor / run / collect / arms） | ✅ 已实现 + 单测 |
 | 题库 | 1 道（L5）+ 模板；目标 39 道 |
 
-桩不是空文件——每个都有 docstring 写清设计意图和踩过的坑，函数体 `raise NotImplementedError`。填桩时请先读注释。
+**没有桩了**：`grep -r NotImplementedError bench harness` 为空。222 个单测，
+`python3 -m pytest tests/ -q` 一条命令跑完（不需要 GPU 的部分自动跳过）。
+
+### 已跑出的第一个真实结果
+
+`l5-only` 的第一道题（`moe-asm-fmoe-l5`）三臂各跑一次，用满题面 1800s 预算：
+
+- **A 臂（裸）推翻了我们的参考答案**。它找到 `solidx=10000/20001` 的配置，
+  让 `aiter.asm_fmoe_a8` 在本机跑通两段 w8a8 MoE，stage1/2 rel_l2 ≈ 2e-3。
+  我独立复现确认后，`expect.md` 已改写为「有条件可用」，记入
+  `runs/corrections.log`。**该题从此不是反事实题**，L5 在它上面的区分能力下降——
+  报告里必须写明。
+- A 与 B 都用满 `--max-usd 3.0` 被切断（`is_error: true`），但仍交付了完整报告。
+  这说明预算上限本身是有效约束，也说明三臂必须用同一组预算——
+  `harness/run.py:assert_arms_comparable` 现在强制这一点。
 
 ---
 

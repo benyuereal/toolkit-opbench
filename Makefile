@@ -1,7 +1,7 @@
 # toolkit-opbench 常用命令
 #
 # 六步工作流见 docs/workflow.md；这里只是把长命令收短。
-# 注意：harness/* 与 bench/{data,hw,timing,check} 目前是桩，跑会 raise NotImplementedError。
+# 无桩：bench/* 与 harness/* 全部已实现，222 个单测见 tests/。
 
 PY      ?= python3
 SUITE   ?= l5-only
