@@ -3,7 +3,7 @@
 > 并行 agent 开工前**先读本文件**，确认自己的写范围与别人不相交。
 > 发现自己要写的路径已被别人占用 → 停下来说，不要覆盖。
 >
-> 最后更新：2026-11-23 14:05
+> 最后更新：2026-11-23 15:55
 
 ## 总目标
 
@@ -17,9 +17,9 @@
 | 角色 | 写范围 | 状态 |
 |---|---|---|
 | **主线程** | `harness/**`、`suites/**`、`docs/**`、`README.md`、`reports/**` | 进行中 |
-| **agent-gemm** | `tasks/gemm-bf16-l1/**`、`baselines/gemm-bf16-l1.json` | 待启动 |
-| **agent-rmsnorm** | `tasks/norm-fused-add-rmsnorm-l1/**`、`baselines/norm-fused-add-rmsnorm-l1.json` | 待启动 |
-| **agent-cli** | `bench/check/integrity.py`、`bench/score/*.py`、`Makefile`、`tests/test_cli.py` | 待启动 |
+| ~~agent-gemm~~ | 已由主线程完成（子 agent 因网关 524 超时终止） | ✅ 完成 |
+| ~~agent-rmsnorm~~ | 已由主线程完成（同上） | ✅ 完成 |
+| ~~agent-cli~~ | 已由主线程完成 | ✅ 完成 |
 
 **禁止跨范围写入。** 需要改别人的文件 → 停下来报告，由主线程协调。
 
@@ -48,3 +48,6 @@
 | 时间 | 事件 |
 |---|---|
 | 14:05 | 建立本文件；主线程开始修 verify/score |
+| 14:40 | 两个子 agent 均因网关 524 超时终止，未留下任何文件；改为主线程完成 |
+| 15:20 | verify/score 真入口 + 退出码测试完成；评分器区分度修复 |
+| 15:50 | gemm / rmsnorm 六件套完成；带宽口径 + 3 处计时/检测 bug 修复 |
