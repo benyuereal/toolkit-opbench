@@ -134,3 +134,123 @@ def snapshot(workdir: str) -> dict:
         if os.path.isfile(os.path.join(workdir, "task.md")) else None,
         "threads": threading.active_count(),
     }
+
+
+# ------------------------------------------------------------------ CLI
+#
+# 为什么必须有真入口：`make verify` 曾经是 `python3 -m bench.check.integrity`
+# 而模块没有 __main__ —— 命令成功退出、什么都没检查。那是"计数器给了、
+# 闸门没关"，比报错危险得多：CI 会显示绿色。
+#
+# 退出码契约：
+#   0  全部通过
+#   1  发现问题（产物有缺陷）
+#   2  用法错误 / 路径不存在
+# 不设"跳过即通过"。
+
+def verify_run(run_dir: str, task_dirs: list[str] | None = None) -> list[str]:
+    """检查一个臂的运行目录。返回问题列表，空表示通过。
+
+    查什么（每一项都对应一种真实的作弊或事故）：
+      * attempt 目录存在（没有 attempt-1 = 这一轮没跑成）
+      * 每个 attempt 的 task.md 哈希与 meta.json 记录的一致（防改题面）
+      * _stdout.jsonl 可解析出 result（防"进程退出 0 但没交付"）
+      * 若有 report.md，则不能含答案侧指纹（见 bench.check.leak）
+    """
+    import json
+    import os
+
+    problems: list[str] = []
+    if not os.path.isdir(run_dir):
+        return [f"运行目录不存在：{run_dir}"]
+
+    tasks = sorted(
+        d for d in os.listdir(run_dir)
+        if os.path.isdir(os.path.join(run_dir, d)) and not d.startswith("_")
+    )
+    if not tasks:
+        return [f"{run_dir} 下没有任何题目目录"]
+
+    for task in tasks:
+        td = os.path.join(run_dir, task)
+        attempt = os.path.join(td, "attempt-1")
+        if not os.path.isdir(attempt):
+            problems.append(f"{task}: 没有 attempt-1（这一轮没跑成或没跑）")
+            continue
+
+        meta_path = os.path.join(attempt, "meta.json")
+        if not os.path.isfile(meta_path):
+            problems.append(f"{task}: 缺 meta.json")
+            meta = {}
+        else:
+            try:
+                with open(meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                problems.append(f"{task}: meta.json 读不了（{e}）")
+                meta = {}
+
+        status = meta.get("status")
+        if status is None:
+            problems.append(f"{task}: meta.json 没有 status 字段")
+        elif status != "ok":
+            problems.append(f"{task}: status={status}（不是 ok）")
+
+        want_hash = meta.get("task_md_sha256")
+        if want_hash:
+            src = os.path.join(str(meta.get("task_dir") or ""), "task.md")
+            if os.path.isfile(src):
+                if hash_file(src) != want_hash:
+                    problems.append(f"{task}: 题面哈希变了（agent 改过 task.md）")
+
+        out = os.path.join(attempt, "_stdout.jsonl")
+        if not os.path.isfile(out):
+            problems.append(f"{task}: 缺 _stdout.jsonl")
+        elif os.path.getsize(out) == 0 and status == "ok":
+            problems.append(f"{task}: status=ok 但 _stdout.jsonl 是空的")
+
+        report = os.path.join(attempt, "report.md")
+        if os.path.isfile(report):
+            from bench.check import leak
+
+            with open(report, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            hits = leak.scan_answer_leak(text)
+            if hits:
+                problems.append(f"{task}: report.md 含答案侧指纹 {hits}")
+
+    return problems
+
+
+def main(argv=None) -> int:
+    import argparse
+    import sys
+
+    p = argparse.ArgumentParser(prog="opbench-verify")
+    p.add_argument("--run", required=True, help="runs/arm-<X> 目录")
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+
+    try:
+        problems = verify_run(a.run)
+    except OSError as e:
+        print(f"用法错误：{e}", file=sys.stderr)
+        return 2
+
+    if a.json:
+        import json as _json
+
+        print(_json.dumps({"run": a.run, "ok": not problems,
+                           "problems": problems}, ensure_ascii=False, indent=2))
+    else:
+        if problems:
+            print(f"verify 失败：{a.run}")
+            for x in problems:
+                print(f"  ✗ {x}")
+        else:
+            print(f"verify 通过：{a.run}")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

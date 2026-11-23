@@ -97,13 +97,50 @@ class TestJudgment(unittest.TestCase):
         }
 
     def test_full_score(self):
+        """满分要求：方向对 + 证据种类齐 + 有定量结果。"""
+        s, why = judgment.score(
+            "asm 后端在 gfx938 上不可用",
+            ["error_output: RuntimeError: unsupport current input type",
+             "command: python3 scripts/probe.py --dtype bf16",
+             "实测 rel_l2 1.66e-3"],
+            self.defn,
+        )
+        self.assertEqual(s, 100, why)
+
+    def test_qualified_without_quantitative(self):
+        """方向对、证据种类齐，但没有定量结果 → 80，不是 100。"""
         s, why = judgment.score(
             "asm 后端在 gfx938 上不可用",
             ["error_output: RuntimeError: unsupport current input type",
              "command: python3 scripts/probe.py --dtype bf16"],
             self.defn,
         )
-        self.assertEqual(s, 100, why)
+        self.assertEqual(s, 80, why)
+        self.assertIn("定量", why)
+
+    def test_wrong_direction_scores_zero(self):
+        """方向答反：证据再齐全也是 0。这是"答错也得 60"那次的直接防线。"""
+        s, why = judgment.score(
+            "asm 后端可用",
+            ["error_output: RuntimeError: boom",
+             "command: python3 probe.py",
+             "rel_l2 1e-3"],
+            self.defn,
+        )
+        self.assertEqual(s, 0, why)
+        self.assertIn("方向错", why)
+
+    def test_self_admitted_unverified_scores_80(self):
+        """有数但自承没验成 → 80。诚实但不等于验成了。"""
+        s, why = judgment.score(
+            "asm 后端不可用。但本次未能在数值上复核。",
+            ["error_output: RuntimeError: boom",
+             "command: python3 probe.py",
+             "cos≈0.10"],
+            self.defn,
+        )
+        self.assertEqual(s, 80, why)
+        self.assertIn("未完成数值验证", why)
 
     def test_thin_evidence(self):
         s, why = judgment.score("asm 不可用", ["只有一条"], self.defn)
@@ -117,7 +154,7 @@ class TestJudgment(unittest.TestCase):
 
     def test_integer_evidence_required_still_supported(self):
         d = dict(self.defn, evidence_required=2)
-        s, _ = judgment.score("asm 不可用", ["a", "b"], d)
+        s, _ = judgment.score("asm 不可用", ["a", "b", "rel_l2 1e-3"], d)
         self.assertEqual(s, 100)
 
     def test_honest_uncertainty(self):

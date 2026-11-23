@@ -131,18 +131,35 @@ class TestCollect(unittest.TestCase):
             self.assertTrue(data["table"][("t1", "A")]["leaked"])
 
     def test_judgment_uses_score_module(self):
+        """collect 必须复用 bench.score.judgment，而不是另立口径。
+
+        用固定 defn（不依赖真实题目文件的当前答案），否则题目一改答案，
+        这条测试就变成在测"题目文件"而不是"collect 有没有接上打分器"。
+        """
+        defn = {"id": "moe-asm-fmoe-l5", "kind": "judgment",
+                "expected_verdict": "unavailable",
+                "verdict_keywords": ["不可用"],
+                "forbidden_claims": ["可以融合"],
+                "evidence_required": ["error_output", "command"]}
         with tempfile.TemporaryDirectory() as d:
             _mkrun(d, "A", "moe-asm-fmoe-l5", report=GOOD)
-            data = C.collect(d)
+            with unittest.mock.patch.object(C, "_definition_for", return_value=defn):
+                data = C.collect(d)
             row = data["table"][("moe-asm-fmoe-l5", "A")]
             self.assertIsNotNone(row["judged"])
             self.assertGreaterEqual(row["judged"], 60)
 
     def test_forbidden_claim_scores_zero(self):
+        defn = {"id": "moe-asm-fmoe-l5", "kind": "judgment",
+                "expected_verdict": "unavailable",
+                "verdict_keywords": ["不可用"],
+                "forbidden_claims": ["可以融合"],
+                "evidence_required": ["error_output", "command"]}
         with tempfile.TemporaryDirectory() as d:
             _mkrun(d, "A", "moe-asm-fmoe-l5",
                    report="可以融合，预期提升 20%\n\npython3 x.py\n")
-            data = C.collect(d)
+            with unittest.mock.patch.object(C, "_definition_for", return_value=defn):
+                data = C.collect(d)
             self.assertEqual(data["table"][("moe-asm-fmoe-l5", "A")]["judged"], 0)
 
 
