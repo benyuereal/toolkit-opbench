@@ -249,10 +249,19 @@ def build(task_id: str, baselines_dir: str = BASELINES_DIR,
     sols = [_t_sol_ms(defn, x["axes"], peak, unit) for x in timings]
     t_sol = math.exp(sum(math.log(s) for s in sols) / len(sols)) if sols else None
 
+    # sclk 在 1200–1350 之间跳（auto DPM），单次读数不可代表全程。
+    # 记录观察到的档位集合，并显式标注：**不要拿 sclk 去做频率折算**。
+    sclk_seen = sorted({x["sclk_mhz"] for x in timings if x.get("sclk_mhz")})
     record = {
         "task": defn.id,
         "t_b_ms": t_b,
         "t_sol_ms": t_sol,
+        "sclk_seen_mhz": sclk_seen,
+        "sclk_note": (
+            "auto DPM 在 1200/1350 间跳变；实测 275–286 TF 与 constants 的 "
+            "279 TF@1350 一致。**不要用 sclk 做频率折算**——"
+            "单次读数会落到空闲档，折算出的达成率会虚高 10–100%。"
+        ),
         "baseline_impl": impl_path,
         "peak_id": peak_id,
         "peak_value": peak,

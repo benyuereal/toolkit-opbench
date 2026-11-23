@@ -54,10 +54,19 @@ def _events():
 
 
 def _sclk() -> int | None:
+    """单次读当前 sclk（**不取众数**）。
+
+    为什么不复用 dcu.current_sclk()：那个函数为 doctor 设计，采 3 次取众数，
+    整个窗口约 0.8 秒。而这里是在测量的迭代间隙里读，只有几微秒到几十毫秒的
+    机会——多采一次就读到负载结束后的空闲档了。这里要的是"此刻"，不是"稳态"。
+    """
     try:
         from bench.hw import dcu
 
-        return dcu.current_sclk()
+        levels = dcu._sclk_levels()
+        if not levels:
+            return None
+        return min(m for _, m in levels)
     except Exception:
         return None
 
@@ -91,7 +100,12 @@ def time_call(fn: Callable[[], None], warmup: int = 10, iters: int = 50,
     samples: list[float] = []
     starts = []
     ends = []
-    for _ in range(iters):
+    # 测量期间**在跑的时候**采 sclk：迭代结束后再读会读到已经回落的空闲档
+    # （实测基线记成 600 MHz，而同一批数据反解出的算力对应 1200–1350）。
+    # 每隔几次迭代采一次，取最大——我们关心的是"这次测量的峰值档位"，
+    # 因为耗时由最快的那段决定不了，但分母口径必须按实际跑到的档位记。
+    sclk_samples: list[int] = []
+    for i in range(iters):
         # 顺序不可换：flush → record → fn → record。
         # flush 之后到 start.record() 之间不能再碰显存。
         flush_mod.flush(nbytes)
@@ -101,10 +115,19 @@ def time_call(fn: Callable[[], None], warmup: int = 10, iters: int = 50,
         e.record()
         starts.append(s)
         ends.append(e)
+        if iters > 6 and i % max(1, iters // 6) == 0 and i > 0:
+            v = _sclk()
+            if v is not None:
+                sclk_samples.append(v)
+    # 最后一个 event 还没同步完时就读：此时 kernel 队列仍在跑
+    v = _sclk()
+    if v is not None:
+        sclk_samples.append(v)
     torch.cuda.synchronize()
     samples = [s.elapsed_time(e) for s, e in zip(starts, ends)]
 
-    sclk_end = _sclk()
+    sclk_end = max(sclk_samples) if sclk_samples else _sclk()
+    sclk_start = sclk_start if sclk_start is not None else sclk_end
     med = statistics.median(samples)
     # 跨设备 event 的典型症状是"太快"（数倍到数十倍）。这里给一条
     # 粗筛：同一 kernel 的 50 次中位数若比最小值大一倍以上，说明
