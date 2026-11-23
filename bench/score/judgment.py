@@ -32,12 +32,20 @@ SCORE_ZERO = 0
 
 
 def _get(defn, key: str, default=None):
-    """defn 可能是 dict，也可能是 dataclass/对象。两种都支持。"""
+    """defn 可能是 dict，也可能是 definition.Definition 这类对象。
+
+    对象优先读 `.raw`（原始 JSON）：属性上可能挂的是同名方法或别的
+    表示形式，而评分只该看题面写了什么。没有 raw 再退回 getattr。
+    """
     if defn is None:
         return default
     if isinstance(defn, dict):
         return defn.get(key, default)
-    return getattr(defn, key, default)
+    raw = getattr(defn, "raw", None)
+    if isinstance(raw, dict) and key in raw:
+        return raw[key]
+    value = getattr(defn, key, default)
+    return default if callable(value) else value
 
 
 def is_forbidden(text: str, forbidden: list[str]) -> list[str]:
@@ -58,6 +66,61 @@ def is_forbidden(text: str, forbidden: list[str]) -> list[str]:
     return hits
 
 
+def _evidence_need(defn) -> tuple[int, list[str]]:
+    """把 evidence_required 归一成 (最少条数, 必需的证据种类)。
+
+    为什么两种形态都收：docs/format.md 定义的是**字符串数组**
+    （["error_output", "command"]），而早期实现按整数条数处理。题面一旦
+    用正式格式，`int(list)` 会直接 TypeError。这里以 format.md 为准，
+    同时兼容整数写法：
+      * int n        → 只要 n 条证据
+      * list[str]    → 条数 = len(list)，且每条种类都要在证据里出现
+    """
+    req = _get(defn, "evidence_required", 1)
+    if req is None:
+        return 1, []
+    if isinstance(req, (int, float)) and not isinstance(req, bool):
+        return max(1, int(req)), []
+    if isinstance(req, str):
+        return 1, [req]
+    if isinstance(req, (list, tuple)):
+        kinds = [str(k) for k in req if str(k).strip()]
+        return max(1, len(kinds)), kinds
+    return 1, []
+
+
+# 证据种类的同义词。要求报告里出现 ASCII 词 "error_output" 是不合理的——
+# 中文报告会写「报错原文」。这里只放**确定指向该种类**的说法，
+# 不用泛词（如「测试」），否则任何报告都能凑满。
+KIND_SYNONYMS = {
+    "error_output": ("error_output", "error", "traceback", "exception", "runtimeerror",
+                     "报错", "错误", "异常"),
+    "command": ("command", "cmd", "python3 ", "bash ", "sh -c", "命令", "复跑"),
+    "import": ("import", "导入"),
+    "call": ("call", "invoke", "调用", "调了", "实测调用"),
+    "log": ("log", "日志"),
+    "results": ("results/", "结果文件", "results.json"),
+}
+
+
+def _missing_kinds(kinds: list[str], evidence: list[str]) -> list[str]:
+    """required 里的每种证据，必须在 evidence 文本里出现（不区分大小写）。
+
+    只数条数是不够的：交两行"我测了"也能凑够 2 条。种类绑定是为了逼
+    证据落在题面要求的维度上（报错原文、复跑命令、调用路径……）。
+    匹配时认同义词（见 KIND_SYNONYMS），因为报告是中文的。
+    """
+    if not kinds:
+        return []
+    blob = "\n".join(evidence).lower()
+    missing = []
+    for k in kinds:
+        alts = KIND_SYNONYMS.get(k, (k,))
+        if not any(a.lower() in blob for a in alts):
+            missing.append(k)
+    return missing
+
+
 def score(verdict: str, evidence: list[str], defn) -> tuple[int, str]:
     """返回 (分数, 理由)。defn 提供 expected_verdict / verdict_keywords /
     forbidden_claims / evidence_required。
@@ -65,7 +128,7 @@ def score(verdict: str, evidence: list[str], defn) -> tuple[int, str]:
     text = (verdict or "").strip()
     keywords = _get(defn, "verdict_keywords", []) or []
     forbidden = _get(defn, "forbidden_claims", []) or []
-    need = int(_get(defn, "evidence_required", 1) or 1)
+    need, need_kinds = _evidence_need(defn)
     evidence = [e for e in (evidence or []) if str(e).strip()]
 
     if not text:
@@ -84,11 +147,14 @@ def score(verdict: str, evidence: list[str], defn) -> tuple[int, str]:
     if not matched and honest:
         return SCORE_HONEST, f"明确声明「{honest[0]}」，诚实但未给出结论"
 
-    if len(evidence) < need:
-        return (
-            SCORE_THIN,
-            f"结论方向正确（命中 {matched[:2]}），但证据 {len(evidence)} 条少于要求的 {need} 条",
-        )
+    missing = _missing_kinds(need_kinds, evidence)
+    if len(evidence) < need or missing:
+        why = f"结论方向正确（命中 {matched[:2]}），但证据 {len(evidence)} 条少于要求的 {need} 条"
+        if missing:
+            why = (
+                f"结论方向正确（命中 {matched[:2]}），但缺少要求的证据种类 {missing}"
+            )
+        return SCORE_THIN, why
 
     return (
         SCORE_FULL,

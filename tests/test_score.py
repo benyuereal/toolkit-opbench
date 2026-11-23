@@ -93,18 +93,32 @@ class TestJudgment(unittest.TestCase):
             "expected_verdict": "不可用",
             "verdict_keywords": ["不可用", "被拒", "不支持"],
             "forbidden_claims": ["可以融合", "有 3 倍空间"],
-            "evidence_required": 2,
+            "evidence_required": ["error_output", "command"],
         }
 
     def test_full_score(self):
         s, why = judgment.score(
-            "asm 后端在 gfx938 上不可用", ["报错原文 A", "报错原文 B"], self.defn
+            "asm 后端在 gfx938 上不可用",
+            ["error_output: RuntimeError: unsupport current input type",
+             "command: python3 scripts/probe.py --dtype bf16"],
+            self.defn,
         )
         self.assertEqual(s, 100, why)
 
     def test_thin_evidence(self):
         s, why = judgment.score("asm 不可用", ["只有一条"], self.defn)
         self.assertEqual(s, 60, why)
+
+    def test_evidence_kinds_all_required(self):
+        """两条证据但都只是"我测了"，缺 command/error_output 种类 → 60 分。"""
+        s, why = judgment.score("asm 不可用", ["我测了两次", "都没成"], self.defn)
+        self.assertEqual(s, 60, why)
+        self.assertIn("种类", why)
+
+    def test_integer_evidence_required_still_supported(self):
+        d = dict(self.defn, evidence_required=2)
+        s, _ = judgment.score("asm 不可用", ["a", "b"], d)
+        self.assertEqual(s, 100)
 
     def test_honest_uncertainty(self):
         s, why = judgment.score("还没测，未测定", [], self.defn)

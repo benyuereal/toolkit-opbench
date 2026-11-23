@@ -126,6 +126,18 @@ class TestDefinition(unittest.TestCase):
         }
         self.assertTrue(any("未知字段" in p for p in defn_mod.validate(d)))
 
+    def test_repo_templates_are_valid(self):
+        """仓库里的真实题面必须过校验：模板坏了，照抄出来的 39 道题全坏。"""
+        import glob
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for path in sorted(glob.glob(os.path.join(root, "tasks", "*", "definition.json"))):
+            with self.subTest(path=path):
+                d = defn_mod.load(path)
+                wl = os.path.join(os.path.dirname(path), "workload.jsonl")
+                if d.kind == "kernel" and os.path.isfile(wl):
+                    ws = wl_mod.load(wl, d)
+                    wl_mod.split(ws)
+
     def test_load_collects_all_problems(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = os.path.join(tmp, "definition.json")

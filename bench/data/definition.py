@@ -54,15 +54,23 @@ class Definition:
     def var_axes(self) -> list[str]:
         return [k for k, v in self.axes.items() if v["type"] == "var"]
 
+    # 这四个用 property 而不是方法：bench/score/judgment.py 是按
+    # getattr(defn, "forbidden_claims") 取值的（defn 可以是 dict 也可以是本类）。
+    # 写成同名方法会让它拿到一个 bound method，进而 TypeError——题面一用
+    # 真实 definition 就炸。property 让两种访问方式得到同一个值。
+    @property
     def expected_verdict(self) -> str | None:
         return self.raw.get("expected_verdict")
 
+    @property
     def verdict_keywords(self) -> list[str]:
         return list(self.raw.get("verdict_keywords") or [])
 
+    @property
     def forbidden_claims(self) -> list[str]:
         return list(self.raw.get("forbidden_claims") or [])
 
+    @property
     def evidence_required(self) -> list[str]:
         return list(self.raw.get("evidence_required") or [])
 
