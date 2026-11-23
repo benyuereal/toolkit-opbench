@@ -1,0 +1,17 @@
+# toolkit-opbench 依赖
+#
+# 原则：核心层（bench/score、bench/data）只用 Python 标准库，
+#       所以单测可以在一台没有 GPU、没有 DCU 驱动的机器上跑。
+#
+# 测量层（bench/timing、bench/hw）需要 torch，但**不要用 pip 安装**：
+# 容器内的 torch 由 DTK 镜像提供（2.11.0+dtk2604 一类），
+# pip 覆盖会打坏 HCC 后端，表现为 torch.cuda.is_available() 变 False。
+# 自查：
+#   python3 -c "import torch; print(torch.__version__, torch.version.hip)"
+#
+# 需要 GPU 的部分（不属于 pip 依赖，说明在此避免误装）：
+#   - claude CLI（被测 agent）：/opt/openbench-node/bin/claude 或 nvm 下的 claude
+#   - hy-smi（时钟与占用查询）
+#
+# 单测依赖（可选，仅开发时）
+pytest>=7.0
