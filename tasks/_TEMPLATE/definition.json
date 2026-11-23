@@ -19,7 +19,7 @@
   "tolerance": {"rtol": 0.02, "atol": 0.01},
   "reference": "reference.py",
   "dcu": {
-    "peak_constant": "fp8_peak_nominal",
+    "peak_constant": "peak_nominal:fp8",
     "requires_graph_capture": false,
     "min_l2_flush_mb": 16
   }

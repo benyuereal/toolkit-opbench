@@ -143,9 +143,14 @@ class TestDoctorRender(unittest.TestCase):
         self.assertEqual(len(table), len(doctor.CHECKS))
 
     def test_exit_code(self):
-        with mock.patch.object(doctor, "run", return_value=self._table(gpu_free="fail")):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with mock.patch.object(doctor, "run", return_value=self._table(gpu_free="fail")), \
+             contextlib.redirect_stdout(buf):
             self.assertEqual(doctor.main([]), 1)
-        with mock.patch.object(doctor, "run", return_value=self._table(constants="warn")):
+        with mock.patch.object(doctor, "run", return_value=self._table(constants="warn")), \
+             contextlib.redirect_stdout(buf):
             self.assertEqual(doctor.main([]), 0)
 
 
