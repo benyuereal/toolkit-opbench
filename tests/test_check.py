@@ -558,3 +558,35 @@ class TestL5SuiteReadiness(unittest.TestCase):
                  for t in ("gemm-fp8-l5", "lin-hadamard-l5")]
         self.assertIn(True, needs)
         self.assertIn(False, needs)
+
+
+class TestTaskFilesTracked(unittest.TestCase):
+    """题目的六件套必须全部入库。
+
+    真实事故：`tasks/norm-fused-add-rmsnorm-l1/task.md` 与 `expect.md`
+    一度只存在于工作区、没有进 git——`git add tasks/` 时它们刚好还没写完。
+    后果是别人 clone 下来这道题是残的，而本地一切正常，很难发现。
+    """
+
+    def test_all_task_files_committed(self):
+        import subprocess
+
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tracked = set(
+            subprocess.run(["git", "-C", root, "ls-files", "tasks"],
+                           capture_output=True, text=True).stdout.splitlines()
+        )
+        missing = []
+        for task in sorted(os.listdir(os.path.join(root, "tasks"))):
+            td = os.path.join(root, "tasks", task)
+            if not os.path.isdir(td):
+                continue
+            # 只查六件套，不扫目录里的一切（会误判 __pycache__ 之类）
+            for name in ("task.md", "definition.json", "workload.jsonl",
+                         "reference.py", "check.py", "expect.md"):
+                if not os.path.exists(os.path.join(td, name)):
+                    continue
+                rel = os.path.join("tasks", task, name)
+                if rel not in tracked:
+                    missing.append(rel)
+        self.assertEqual(missing, [], f"这些题目文件没进 git：{missing}")
