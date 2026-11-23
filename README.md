@@ -59,7 +59,7 @@ tasks/<id>/{task.md, definition.json, workload.jsonl, reference.py}
         ├── prepare ──→ (task, arm) 队列：A / B / C × 每题
         │
         ├── run ─────→ runs/<arm>/<task>/attempt-N/{transcript.json, artifacts/}
-        │                 A 臂：su - opeval（chmod 700 挡住 skill）
+        │                 A 臂：su - opbench（chmod 700 挡住 skill）
         │                 B 臂：+ libraries-registry.yaml
         │                 C 臂：+ skill/（只读软链）
         │

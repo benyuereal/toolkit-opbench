@@ -18,8 +18,8 @@
 跑 A 臂之前，把技能仓库移出 `/workspace`：
 
 ```bash
-mkdir -p /var/.opeval-hidden
-mv /workspace/toolkit_skills /var/.opeval-hidden/toolkit_skills
+mkdir -p /var/.opbench-hidden
+mv /workspace/toolkit_skills /var/.opbench-hidden/toolkit_skills
 ```
 
 跑完立刻移回。**这是「防君子」不是「防小人」**，所以配第 2.2 条的检测。
@@ -46,7 +46,7 @@ A 臂如果偷看了 skill，它会说出**只有 skill 里才有的东西**。�
 
 规则：
 1. 跑 bench 前检查 `hy-smi` 的 HCU% —— 有任一卡 > 20% 就等
-2. 用锁文件 `/tmp/opeval-gpu.lock`，`flock` 保护整个 bench 段
+2. 用锁文件 `/tmp/opbench-gpu.lock`，`flock` 保护整个 bench 段
 3. 单次 bench 里必须记 `clock_mhz` 与 `timestamp`（时钟漂移是我们踩过三次的坑）
 
 ## 四、评分（只认重跑）

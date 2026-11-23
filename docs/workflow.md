@@ -23,7 +23,7 @@ python3 -m harness.collect --suite suites/l5-only.yaml         # 6 报告
 
 ## 2. prepare：这次跑什么
 
-按 suite 展开成 `(task, arm)` 队列，建好 `runs/<arm>/<task>/`（chmod 777，A 臂要以 opeval 写）。
+按 suite 展开成 `(task, arm)` 队列，建好 `runs/<arm>/<task>/`（chmod 777，A 臂要以 opbench 写）。
 
 ## 3. run：执行契约
 

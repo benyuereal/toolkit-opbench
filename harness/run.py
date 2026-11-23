@@ -1,7 +1,7 @@
 """单臂单题执行器：隔离 / 环境注入 / 超时 / 产物收集。
 
 执行契约（与 protocol.md 一致）：
-  1. 建 runs/<arm>/<task>/ 作为 cwd，chmod 777（A 臂要以 opeval 用户写）
+  1. 建 runs/<arm>/<task>/ 作为 cwd，chmod 777（A 臂要以 opbench 用户写）
   2. 注入上下文（A 无 / B 只给 libraries-registry.yaml / C 给 skill 仓库）
   3. 预热时钟到工作档，记录 sclk
   4. timeout <budget> claude -p "$(cat task.md)" --output-format json

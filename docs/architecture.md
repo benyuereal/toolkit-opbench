@@ -208,7 +208,7 @@ opbench report --suite l5-only          # 6 出报告
 ### 第 3 步 run（每单元的执行契约）
 
 ```
-1. 建 runs/<arm>/<task>/ 作为 cwd，chmod 777（A 臂要用 opeval 用户写）
+1. 建 runs/<arm>/<task>/ 作为 cwd，chmod 777（A 臂要用 opbench 用户写）
 2. 注入上下文（A 无 / B 只给 libraries-registry.yaml / C 给 skill 仓库）
 3. 预热时钟（跑一段 dummy 直到 sclk 到工作档），记录 sclk
 4. timeout <budget> claude -p "$(cat task.md)" --output-format json
