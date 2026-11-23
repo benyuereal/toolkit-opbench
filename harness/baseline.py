@@ -43,14 +43,60 @@ def _resolve_impl(dotted: str):
     return getattr(mod, attr)
 
 
-def _call_impl(fn, tensors: dict, defn) -> None:
+def _inplace_inputs(defn) -> list[str]:
+    """definition.dcu.inplace_inputs 声明的、会被原地改写的输入名。
+
+    没有这个声明就不能安全地量原地改写型实现：每轮喂同一个张量，
+    第 2 轮起输入已经是上一轮的结果，耗时会漂、结果也无意义
+    （`fused_add_rms_norm` 这类会不断累加 residual）。
+    """
+    return list((defn.dcu or {}).get("inplace_inputs") or [])
+
+
+def _call_impl(fn, tensors: dict, defn, copies: dict | None = None) -> None:
     """把 build_inputs 造的张量按 definition.inputs 的键序喂进去。
 
     基线实现可能是「原地改写 + 返回元组」型（如 fused_add_rms_norm），
     也可能只返回一个张量。两种都接受，返回值忽略——我们只量时间。
+
+    `copies` 非空时，先把会被改写的输入拷回副本再调。**拷贝发生在
+    计时窗口之外**（调用方在 fn 里做，见 _make_callable），否则量到的是
+    拷贝而不是算子。
     """
     args = [tensors[k] for k in defn.inputs]
     fn(*args)
+
+
+def _make_callable(impl, tensors: dict, defn):
+    """构造每轮可安全重复调用的闭包。
+
+    原地改写型：每轮先把**副本**填回去（`copy_`），再调用。
+      * `copy_` 是 device-to-device 拷贝，对 268MB 是几十 µs 量级，
+        会污染小算子的测量——所以只对声明了 inplace_inputs 的题启用。
+      * 它确实会抬高 T_b。这是**有意接受的偏差**：比起测出一个错误的数，
+        宁可在报告里注明"含恢复拷贝开销"。
+    非原地型：直接调用。
+    """
+    inplace = _inplace_inputs(defn)
+    if not inplace:
+        def call():
+            args = [tensors[k] for k in defn.inputs]
+            impl(*args)
+        return call
+
+    # 原始副本（只在构造时拷一次）与工作区（每轮恢复用）
+    originals = {k: tensors[k].clone() for k in inplace}
+    for k in inplace:
+        if k not in tensors:
+            raise ValueError(f"inplace_inputs 里的 {k!r} 不在 definition.inputs 里")
+
+    def call():
+        for k in inplace:
+            tensors[k].copy_(originals[k])
+        args = [tensors[k] for k in defn.inputs]
+        impl(*args)
+
+    return call
 
 
 
