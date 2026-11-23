@@ -223,6 +223,42 @@ def _binding_names(text: str) -> tuple[dict[str, str], set[str]]:
     return bound, assigned
 
 
+def _strip_python_prose(text: str) -> str:
+    """去掉 Python 文件里的 docstring 与 # 注释。
+
+    为什么必须去：docstring 是**散文**。脚本里写
+    「sglang's fallback does F.linear(x, H) with no 1/sqrt(n)」
+    是在*解释*别人怎么调的，不是声明自己调了 `F.linear`。
+    实测这条被判成"编造 F.linear"——把一个正确的说明标成幻觉。
+
+    只用于 .py 文件；.md/.sh/.txt 保持原样（那里没有代码/散文之分）。
+    """
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    lines = text.splitlines()
+    drop: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            body = getattr(node, "body", None) or []
+            if body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and \
+                    isinstance(body[0].value.value, str):
+                d = body[0]
+                for ln in range(d.lineno - 1, (d.end_lineno or d.lineno)):
+                    drop.add(ln)
+    out = []
+    for i, line in enumerate(lines):
+        if i in drop:
+            continue
+        out.append(line.split("#", 1)[0] if line.lstrip().startswith("#") else line)
+    return "\n".join(out)
+
+
 def extract_claims(workdir: str) -> dict:
     """从产物里抽出"它声称的东西"：import_path、库名、数字、形状。
     交给 check/hallucination.py 逐条验。"""
@@ -238,7 +274,10 @@ def extract_claims(workdir: str) -> dict:
             p = os.path.join(sdir, name)
             if os.path.isfile(p) and name.endswith((".py", ".sh", ".md", ".txt")):
                 with open(p, encoding="utf-8", errors="replace") as f:
-                    texts.append((os.path.join("scripts", name), f.read()))
+                    body = f.read()
+                if name.endswith(".py"):
+                    body = _strip_python_prose(body)
+                texts.append((os.path.join("scripts", name), body))
 
     import_paths: set[str] = set()
     libraries: set[str] = set()

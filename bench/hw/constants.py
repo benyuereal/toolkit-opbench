@@ -46,6 +46,22 @@ VARIANT = {
     ("impl_measured", "fp8"): "compute.fp8_impl_measured_tf",
 }
 
+# 带宽口径：与算力三类**同一套语义**，但对象是 GB/s。
+#
+# 为什么要单列：count 型算力的分母与簿记型算力的分母不是一回事。
+# 上游的 memory.* 节点没有 caliber 字段，所以 `KINDS` 覆盖不到它们；
+# 但语义上 `stream_copy_peak` 就是「本机某高质量实现的实测带宽」，
+# 正对应 peak_achievable。`spec_bandwidth` 是型号标称，对应 peak_nominal。
+#
+# 用错口径的后果与算力那边一样严重：constants 的 conflicts 段记着，
+# 同一个 955 GB/s 拿 1100 当分母是 87%（"到头了"），
+# 拿 1724 当分母是 55%（"还有 1.8×"）。分母换了，结论就反了。
+BANDWIDTH = {
+    ("peak_achievable", "copy"): "memory.stream_copy_peak",
+    ("peak_achievable", "read"): "memory.stream_read_peak",
+    ("peak_nominal", "ddr"): "memory.spec_bandwidth",
+}
+
 # 时钟档位的实测注记（本仓库实测，2026-11-23；数字是观测值，不是性能分母）
 SCLK_NOTE = {
     "idle_mhz_observed": 600,
@@ -171,14 +187,19 @@ def get(const_id: str) -> dict:
         precision = precision.strip()
         if kind not in KINDS:
             raise KeyError(f"{cid}: 类别必须是 {KINDS}")
-        try:
-            path = VARIANT[(kind, precision)]
-        except KeyError:
-            have = sorted(f"{k}:{p}" for k, p in VARIANT)
+        # 先在算力表查，再在带宽表查 —— 两张表共用 `类别:对象` 的语法，
+        # 但对象不同（fp8/bf16 是精度，copy/read/ddr 是访存模式）。
+        path = VARIANT.get((kind, precision))
+        if path is None:
+            path = BANDWIDTH.get((kind, precision))
+        if path is None:
+            have = sorted(f"{k}:{p}" for k, p in VARIANT) + \
+                   sorted(f"{k}:{p}" for k, p in BANDWIDTH)
             raise KeyError(
                 f"{cid}: 上游没有这个 {kind}/{precision} 值。现有：{have}。"
-                "缺就如实报缺，不要拿别的精度顶替（fp8/bf16 是 2:1 双速率）"
-            ) from None
+                "缺就如实报缺，不要拿别的精度/模式顶替"
+                "（fp8/bf16 是 2:1 双速率；read/copy 是两个不同的带宽口径）"
+            )
         return _result(path, kind)
 
     # 点分路径：先看是不是完整叶子
@@ -199,10 +220,34 @@ def get(const_id: str) -> dict:
 
 
 def peak(kind: str, precision: str) -> float:
-    """按 类别+精度 取峰值。kind 必须是 KINDS 之一。"""
+    """按 类别+精度 取峰值。kind 必须是 KINDS 之一。
+
+    对带宽类（`precision` 取 copy/read/ddr），结果单位是 GB/s；
+    对算力类（fp8/bf16），单位是 TFLOPS。调用方必须知道自己在要哪个——
+    `peak` 只管 id 解析，不替你判断"这道题该用算力还是带宽"。
+    """
     if kind not in KINDS:
         raise ValueError(f"kind 必须是 {KINDS} 之一，实际 {kind!r}")
     return float(get(f"{kind}:{precision}")["value"])
+
+
+def bandwidth(kind: str, mode: str) -> float:
+    """取带宽峰值（GB/s）。kind ∈ KINDS，mode ∈ BANDWIDTH 的第二键。"""
+    if kind not in KINDS:
+        raise ValueError(f"kind 必须是 {KINDS} 之一，实际 {kind!r}")
+    try:
+        path = BANDWIDTH[(kind, mode)]
+    except KeyError:
+        have = sorted(f"{k}:{m}" for k, m in BANDWIDTH)
+        raise KeyError(
+            f"{kind}:{mode} 没有带宽常数。现有：{have}。"
+            "带宽的分母与算力的分母同样不能编"
+        ) from None
+    node = _result(path, kind)
+    unit = (node.get("unit") or "").upper()
+    if unit != "GB/S":
+        raise ConstantsError(f"{path} 单位是 {node.get('unit')!r}，不是 GB/s")
+    return float(node["value"])
 
 
 def l2_bytes() -> int:

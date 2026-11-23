@@ -8,6 +8,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from harness import collect as C
 
@@ -99,7 +100,7 @@ class TestCollect(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             for arm in "ABC":
                 _mkrun(d, arm, "t1", report=GOOD, results={"r.json": {"x": 1}})
-            data = C.collect(d)
+            data = C.collect(d, isolated_root='')
             self.assertEqual(data["tasks"], ["t1"])
             self.assertTrue(data["deltas"]["balanced"])
             for arm in "ABC":
@@ -109,7 +110,7 @@ class TestCollect(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             for arm in "AC":
                 _mkrun(d, arm, "t1", report=GOOD)
-            data = C.collect(d)
+            data = C.collect(d, isolated_root='')
             self.assertFalse(data["deltas"]["balanced"])
             self.assertTrue(any("题数不一致" in v for v in data["deltas"]["verdicts"]))
 
@@ -121,13 +122,13 @@ class TestCollect(unittest.TestCase):
             os.makedirs(p)
             with open(os.path.join(p, "report.md"), "w", encoding="utf-8") as f:
                 f.write(GOOD)
-            data = C.collect(d)
+            data = C.collect(d, isolated_root='')
             self.assertEqual(data["deltas"]["A"]["n"], 1)
 
     def test_leak_marks_row(self):
         with tempfile.TemporaryDirectory() as d:
             _mkrun(d, "A", "t1", report="我用了 fuse_groupgemm_permute_quant")
-            data = C.collect(d)
+            data = C.collect(d, isolated_root='')
             self.assertTrue(data["table"][("t1", "A")]["leaked"])
 
     def test_judgment_uses_score_module(self):
@@ -143,8 +144,8 @@ class TestCollect(unittest.TestCase):
                 "evidence_required": ["error_output", "command"]}
         with tempfile.TemporaryDirectory() as d:
             _mkrun(d, "A", "moe-asm-fmoe-l5", report=GOOD)
-            with unittest.mock.patch.object(C, "_definition_for", return_value=defn):
-                data = C.collect(d)
+            with mock.patch.object(C, "_definition_for", return_value=defn):
+                data = C.collect(d, isolated_root='')
             row = data["table"][("moe-asm-fmoe-l5", "A")]
             self.assertIsNotNone(row["judged"])
             self.assertGreaterEqual(row["judged"], 60)
@@ -158,8 +159,8 @@ class TestCollect(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             _mkrun(d, "A", "moe-asm-fmoe-l5",
                    report="可以融合，预期提升 20%\n\npython3 x.py\n")
-            with unittest.mock.patch.object(C, "_definition_for", return_value=defn):
-                data = C.collect(d)
+            with mock.patch.object(C, "_definition_for", return_value=defn):
+                data = C.collect(d, isolated_root='')
             self.assertEqual(data["table"][("moe-asm-fmoe-l5", "A")]["judged"], 0)
 
 
@@ -171,7 +172,7 @@ class TestDeltas(unittest.TestCase):
             _mkrun(d, "A", "t1", report="不可用")
             _mkrun(d, "B", "t1", report=GOOD_KERNEL)
             _mkrun(d, "C", "t1", report=GOOD_KERNEL)
-            data = C.collect(d)
+            data = C.collect(d, isolated_root='')
             v = data["deltas"]["verdicts"]
             self.assertEqual(data["deltas"]["d_eff_C_minus_A"], 100.0)
             self.assertTrue(any("B 与 C" in x for x in v), v)
@@ -182,7 +183,7 @@ class TestDeltas(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             for arm in "ABC":
                 _mkrun(d, arm, "t1", report=GOOD_KERNEL)
-            v = C.collect(d)["deltas"]["verdicts"]
+            v = C.collect(d, isolated_root='')["deltas"]["verdicts"]
             self.assertTrue(any("砍文档" in x for x in v), v)
 
     def test_hallucination_regression_fires(self):
@@ -191,7 +192,7 @@ class TestDeltas(unittest.TestCase):
             _mkrun(d, "B", "t1", report="python3 x.py 得到 1 ms")
             _mkrun(d, "C", "t1",
                    report="python3 x.py 得到 1 ms\n调用 ghostlib.no_such_fn(3) 加速 9 ms")
-            data = C.collect(d)
+            data = C.collect(d, isolated_root='')
             v = data["deltas"]["verdicts"]
             self.assertTrue(any("立刻停" in x for x in v), v)
 
@@ -201,20 +202,20 @@ class TestRender(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             for arm in "ABC":
                 _mkrun(d, arm, "t1", report=GOOD_KERNEL)
-            text = C.render_report(C.collect(d))
+            text = C.render_report(C.collect(d, isolated_root=''))
         for section in ("## 结论一句话", "## 三臂对比", "## Δ", "## 泄漏与污染"):
             self.assertIn(section, text)
 
     def test_missing_arm_shows_unrun(self):
         with tempfile.TemporaryDirectory() as d:
             _mkrun(d, "A", "t1", report=GOOD)
-            text = C.render_report(C.collect(d))
+            text = C.render_report(C.collect(d, isolated_root=''))
         self.assertIn("未跑", text)
 
     def test_write_report(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
             _mkrun(d, "A", "t1", report=GOOD)
-            path = C.write_report(d, out)
+            path = C.write_report(d, out, isolated_root='')
             self.assertTrue(os.path.isfile(path))
             self.assertTrue(os.path.isfile(os.path.join(out, "report.json")))
 

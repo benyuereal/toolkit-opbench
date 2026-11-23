@@ -40,17 +40,39 @@ def _arm_dir(runs_dir: str, arm: str) -> str:
     return os.path.join(runs_dir, f"arm-{arm}")
 
 
-def _attempt_dirs(runs_dir: str, arm: str) -> list[tuple[str, str]]:
-    """[(task_id, attempt_dir)]，每个 task 一条（只认 attempt-1）。"""
-    base = _arm_dir(runs_dir, arm)
-    out = []
-    if not os.path.isdir(base):
-        return out
-    for task_id in sorted(os.listdir(base)):
-        d = os.path.join(base, task_id, ATTEMPT)
-        if os.path.isdir(d):
-            out.append((task_id, d))
-    return out
+# 隔离臂（有独立用户的，目前只有 A）的 cwd 在仓库外的 /tmp/opbench-run。
+# 汇总必须同时扫这两处，否则 A 臂的结果会静默消失——那会让 Δ 变成
+# 「C 减一个不存在的 A」，看起来像 C 大幅领先。
+ISOLATED_ROOT = "/tmp/opbench-run"
+
+
+def _candidate_roots(runs_dir: str, isolated_root: str | None = None) -> list[str]:
+    roots = [runs_dir]
+    iso = isolated_root
+    if iso is None:
+        iso = os.environ.get("OPBENCH_ISOLATED_ROOT", ISOLATED_ROOT)
+    if iso and os.path.isdir(iso) and os.path.realpath(iso) != os.path.realpath(runs_dir):
+        roots.append(iso)
+    return roots
+
+
+def _attempt_dirs(runs_dir: str, arm: str,
+                  isolated_root: str | None = None) -> list[tuple[str, str]]:
+    """[(task_id, attempt_dir)]，每个 task 一条（只认 attempt-1）。
+
+    仓库内与隔离目录都扫，同一题以隔离目录为准（那是真正跑出来的那份，
+    仓库内可能只是早先的预演）。
+    """
+    found: dict[str, str] = {}
+    for root in _candidate_roots(runs_dir, isolated_root):
+        base = os.path.join(root, f"arm-{arm}")
+        if not os.path.isdir(base):
+            continue
+        for task_id in sorted(os.listdir(base)):
+            d = os.path.join(base, task_id, ATTEMPT)
+            if os.path.isdir(d):
+                found[task_id] = d
+    return sorted(found.items())
 
 
 def _load_json(path: str) -> dict | None:
@@ -203,19 +225,23 @@ def leak_hits(attempt_dir: str) -> dict[str, list[str]]:
     return leak.scan_dir(attempt_dir)
 
 
-def collect(runs_dir: str) -> dict:
-    """扫 runs/，返回 {tasks: [...], arms: [...], table: {(task,arm): row}, deltas}"""
+def collect(runs_dir: str, isolated_root: str | None = None) -> dict:
+    """扫 runs/，返回 {tasks: [...], arms: [...], table: {(task,arm): row}, deltas}
+
+    `isolated_root` 传给 `_candidate_roots`；测试传空串可只扫给定目录，
+    避免被本机 /tmp/opbench-run 的真实运行干扰。
+    """
     # 先列出所有出现过任务的目录名（各臂可能只跑了一部分）
     tasks: list[str] = []
     for arm in ARMS:
-        for task_id, _ in _attempt_dirs(runs_dir, arm):
+        for task_id, _ in _attempt_dirs(runs_dir, arm, isolated_root):
             if task_id not in tasks:
                 tasks.append(task_id)
     tasks.sort()
 
     table: dict[tuple[str, str], dict] = {}
     for arm in ARMS:
-        for task_id, d in _attempt_dirs(runs_dir, arm):
+        for task_id, d in _attempt_dirs(runs_dir, arm, isolated_root):
             meta = _load_json(os.path.join(d, "meta.json")) or {}
             report = _read(os.path.join(d, "report.md"))
             artifacts = meta.get("artifacts") or []
@@ -404,8 +430,9 @@ def render_report(table: dict, template: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def write_report(runs_dir: str, out_dir: str) -> str:
-    data = collect(runs_dir)
+def write_report(runs_dir: str, out_dir: str,
+                 isolated_root: str | None = None) -> str:
+    data = collect(runs_dir, isolated_root)
     text = render_report(data)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "report.md")

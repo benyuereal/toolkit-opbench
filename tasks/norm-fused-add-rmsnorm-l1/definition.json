@@ -1,0 +1,80 @@
+{
+  "id": "norm-fused-add-rmsnorm-l1",
+  "kind": "kernel",
+  "family": "norm-act",
+  "tier": "L1",
+  "precision": [
+    "bfloat16"
+  ],
+  "axes": {
+    "M": {
+      "type": "var",
+      "domain": {
+        "values": [
+          4096,
+          8192,
+          13312
+        ]
+      }
+    },
+    "H": {
+      "type": "const",
+      "value": 4096
+    }
+  },
+  "inputs": {
+    "x": {
+      "shape": [
+        "M",
+        "H"
+      ],
+      "dtype": "bfloat16"
+    },
+    "residual": {
+      "shape": [
+        "M",
+        "H"
+      ],
+      "dtype": "bfloat16"
+    },
+    "weight": {
+      "shape": [
+        "H"
+      ],
+      "dtype": "bfloat16"
+    }
+  },
+  "outputs": {
+    "out": {
+      "shape": [
+        "M",
+        "H"
+      ],
+      "dtype": "bfloat16"
+    },
+    "residual_out": {
+      "shape": [
+        "M",
+        "H"
+      ],
+      "dtype": "bfloat16"
+    }
+  },
+  "tolerance": {
+    "rtol": 0.02,
+    "atol": 0.01
+  },
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:copy",
+    "baseline_impl": "lightop.fused_add_rms_norm",
+    "inplace_inputs": [
+      "x",
+      "residual"
+    ],
+    "work": "4*M*H*2",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true
+  }
+}

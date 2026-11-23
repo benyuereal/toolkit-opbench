@@ -168,6 +168,18 @@ def build(task_id: str, baselines_dir: str = BASELINES_DIR,
 
     peak_info = C.get(peak_id)
     peak = float(peak_info["value"])
+    # 单位必须与 work_unit 匹配：flop 配 TFLOPS，byte 配 GB/s。
+    # 不匹配的后果不是报错而是**静默算错**——拿 279 TFLOPS 去除 268MB，
+    # T_sol 会小几个数量级，"达成率"看起来像 10000%。
+    want_unit = {"flop": "TFLOPS", "byte": "GB/S"}[unit]
+    got_unit = (peak_info.get("unit") or "").upper()
+    if got_unit != want_unit:
+        raise ValueError(
+            f"{defn.id}: work_unit={unit!r} 需要峰值的单位是 {want_unit}，"
+            f"但 {peak_id} 的单位是 {peak_info.get('unit')!r}。"
+            "带宽受限的题要用带宽常数（如 peak_achievable:copy → 1350 GB/s），"
+            "不能用算力 TFLOPS 冒充"
+        )
 
     pub = _workload_of(defn, td)
 
