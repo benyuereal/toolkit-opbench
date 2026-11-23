@@ -25,5 +25,6 @@
     "error_output",
     "command"
   ],
-  "notes": "题目目录沿用 l5-asm-fmoe-a8；id 与 suites/*.yaml 的 moe-asm-fmoe-l5 对齐。2026-11-23 参考答案被 A 臂实测推翻并经独立复核（见 runs/corrections.log）：正确答案是「有条件可用」——必须显式给 mode+solidx，且不是一步融合。"
+  "notes": "题目目录沿用 l5-asm-fmoe-a8；id 与 suites/*.yaml 的 moe-asm-fmoe-l5 对齐。2026-11-23 参考答案被 A 臂实测推翻并经独立复核（见 runs/corrections.log）：正确答案是「有条件可用」——必须显式给 mode+solidx，且不是一步融合。",
+  "needs_gpu": true
 }

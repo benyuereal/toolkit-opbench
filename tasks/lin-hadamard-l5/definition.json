@@ -1,0 +1,27 @@
+{
+  "id": "lin-hadamard-l5",
+  "kind": "judgment",
+  "family": "linear-attn",
+  "tier": "L5",
+  "question": "本机有没有可直接调用的 hadamard 变换 symbol（独立函数）",
+  "expected_verdict": "unavailable",
+  "verdict_keywords": [
+    "没有",
+    "内联",
+    "不存在",
+    "mhc_pre_mix"
+  ],
+  "forbidden_claims": [
+    "有独立函数",
+    "可以直接调",
+    "有 hadamard 接口"
+  ],
+  "evidence_required": [
+    "import",
+    "call",
+    "command",
+    "error_output"
+  ],
+  "notes": "参考答案见 expect.md。要区分「库里没有这个 symbol」与「它被内联进别的 kernel」。",
+  "needs_gpu": false
+}

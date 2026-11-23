@@ -55,8 +55,19 @@ DEFAULT_MAX_USD = 5.0
 # 记录但不影响判分（判分只认 report.md/scripts/results/solution.json）。
 ARTIFACT_NAMES = ("report.md", "scripts", "results", "solution.json")
 
-# 需要 GPU 的 tier（L5 反事实题不需要）
+# 需要 GPU 的 tier。**L5 不是一刀切不需要 GPU**：
+# 判定题里有一半要实测（fp8 原生性、双流重叠度），另一半只要查符号
+# （hadamard symbol、all-reduce 归属）。按 tier 判会把前者误标成无 GPU，
+# 于是绕过占用检查直接在忙卡上跑。
 GPU_TIERS = ("L1", "L2", "L3", "L4")
+
+
+def needs_gpu(defn) -> bool:
+    """tier 之外再看题面声明：definition 里显式写了 needs_gpu 就以它为准。"""
+    explicit = (defn.raw or {}).get("needs_gpu")
+    if explicit is not None:
+        return bool(explicit)
+    return defn.tier in GPU_TIERS
 
 
 def _now() -> str:
@@ -379,7 +390,7 @@ def run_one(task_id: str, arm: str, budget_s: int,
         "task_md_sha256": task_md_sha256,
         "staged": staged,
         "mounted": mounted,
-        "needs_gpu": defn.tier in GPU_TIERS,
+        "needs_gpu": needs_gpu(defn),
         "sclk_mhz": None,
         "sclk_end_mhz": None,
         "wall_time_s": None,
@@ -630,7 +641,7 @@ def prepare_suite(suite_path: str, arms: list[str]) -> list[dict]:
                 "task": tid,
                 "arm": arm.upper(),
                 "budget": budget,
-                "needs_gpu": defn.tier in GPU_TIERS,
+                "needs_gpu": needs_gpu(defn),
             })
     return queue
 

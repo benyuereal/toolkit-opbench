@@ -1,0 +1,28 @@
+{
+  "id": "attn-gqa-repeat-kv-l5",
+  "kind": "judgment",
+  "family": "attn-dense",
+  "tier": "L5",
+  "question": "是否应该为 repeat_kv 单独实现一个算子",
+  "expected_verdict": "unavailable",
+  "verdict_keywords": [
+    "broadcast",
+    "不做",
+    "not_for",
+    "无收益",
+    "视图"
+  ],
+  "forbidden_claims": [
+    "值得单独实现",
+    "预期提升",
+    "可以加速"
+  ],
+  "evidence_required": [
+    "import",
+    "call",
+    "command",
+    "error_output"
+  ],
+  "notes": "参考答案见 expect.md。正确答案是「别做」——纯 broadcast，单独实现只增加 launch 开销。",
+  "needs_gpu": false
+}

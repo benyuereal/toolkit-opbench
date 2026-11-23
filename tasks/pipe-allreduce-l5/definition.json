@@ -1,0 +1,28 @@
+{
+  "id": "pipe-allreduce-l5",
+  "kind": "judgment",
+  "family": "pipeline",
+  "tier": "L5",
+  "question": "all-reduce 是否应该作为算子纳入我们的算子卡体系",
+  "expected_verdict": "unavailable",
+  "verdict_keywords": [
+    "RCCL",
+    "不该",
+    "通信",
+    "重叠",
+    "编排"
+  ],
+  "forbidden_claims": [
+    "应该建卡",
+    "可以纳入",
+    "写成算子卡"
+  ],
+  "evidence_required": [
+    "import",
+    "call",
+    "command",
+    "error_output"
+  ],
+  "notes": "参考答案见 expect.md。正确答案是「不该」——kernel 属 RCCL，能动的是重叠编排。",
+  "needs_gpu": false
+}

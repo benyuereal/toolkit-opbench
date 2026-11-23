@@ -512,3 +512,49 @@ class TestAnswerIsolation(unittest.TestCase):
         from harness import run
 
         run.guard_answer_readable("moe-asm-fmoe-l5", "C")  # 不应抛
+
+
+class TestL5SuiteReadiness(unittest.TestCase):
+    """l5-only 要能真的开跑：六题齐全、题面不泄答案、GPU 需求标注正确。"""
+
+    def test_all_l5_tasks_present(self):
+        import yaml
+        from harness import run
+
+        suite = yaml.safe_load(open("suites/l5-only.yaml", encoding="utf-8"))
+        for spec in suite["tasks"]:
+            with self.subTest(task=spec["id"]):
+                td = run.task_dir(spec["id"])
+                for f in ("task.md", "definition.json", "expect.md"):
+                    self.assertTrue(os.path.isfile(os.path.join(td, f)),
+                                    f"{spec['id']} 缺 {f}")
+
+    def test_task_md_does_not_contain_answer(self):
+        """题面不能出现答案侧关键词，否则等于把答案发给三臂。"""
+        from bench.check import leak
+
+        for task in ("gemm-fp8-l5", "moe-shared-expert-l5", "attn-gqa-repeat-kv-l5",
+                     "lin-hadamard-l5", "pipe-allreduce-l5"):
+            p = os.path.join("tasks", task, "task.md")
+            text = open(p, encoding="utf-8").read()
+            self.assertEqual(leak.scan_answer_leak(text), [], f"{task} 题面泄答案")
+
+    def test_needs_gpu_annotated(self):
+        from harness import run
+
+        wants = {"gemm-fp8-l5": True, "moe-shared-expert-l5": True,
+                 "attn-gqa-repeat-kv-l5": False, "lin-hadamard-l5": False,
+                 "pipe-allreduce-l5": False}
+        for tid, expect in wants.items():
+            with self.subTest(task=tid):
+                self.assertEqual(run.needs_gpu(run.load_definition(run.task_dir(tid))),
+                                 expect)
+
+    def test_l5_is_not_uniformly_cpu(self):
+        """L5 不是一刀切不需要 GPU：有一半要实测。"""
+        from harness import run
+
+        needs = [run.needs_gpu(run.load_definition(run.task_dir(t)))
+                 for t in ("gemm-fp8-l5", "lin-hadamard-l5")]
+        self.assertIn(True, needs)
+        self.assertIn(False, needs)

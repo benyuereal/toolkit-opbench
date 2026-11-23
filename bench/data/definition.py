@@ -26,11 +26,12 @@ DTYPES = (
 # 每类题允许出现的顶层字段。多了就是拼错或抄错。
 _COMMON_KEYS = {
     "id", "kind", "family", "tier", "precision", "axes", "inputs", "outputs",
-    "tolerance", "reference", "dcu", "question", "notes",
+    "tolerance", "reference", "dcu", "question", "notes", "needs_gpu",
 }
 _JUDGMENT_KEYS = {
     "id", "kind", "family", "tier", "question", "expected_verdict",
     "verdict_keywords", "forbidden_claims", "evidence_required", "notes",
+    "needs_gpu",
 }
 
 

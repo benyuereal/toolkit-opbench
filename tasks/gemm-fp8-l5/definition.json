@@ -1,0 +1,30 @@
+{
+  "id": "gemm-fp8-l5",
+  "kind": "judgment",
+  "family": "gemm",
+  "tier": "L5",
+  "question": "在本机 gfx938 上，fp8 GEMM 有没有走原生 fp8 MMA 的路径；若有，它比同库同形状的 bf16 快多少",
+  "expected_verdict": "conditional",
+  "verdict_keywords": [
+    "原生",
+    "fp8",
+    "快",
+    "1.5",
+    "2.0",
+    "同库同形状"
+  ],
+  "forbidden_claims": [
+    "dequant 回退",
+    "fp8 没有原生路径",
+    "提升 10 倍",
+    "接近 560"
+  ],
+  "evidence_required": [
+    "import",
+    "call",
+    "command",
+    "error_output"
+  ],
+  "notes": "参考答案见 expect.md。判据是「同库同形状对照」——跨库比较会把库的差距记成精度差距。",
+  "needs_gpu": true
+}

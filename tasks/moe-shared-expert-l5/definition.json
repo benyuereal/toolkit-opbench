@@ -1,0 +1,28 @@
+{
+  "id": "moe-shared-expert-l5",
+  "kind": "judgment",
+  "family": "moe",
+  "tier": "L5",
+  "question": "共享专家（shared expert）能否挪到独立 stream，与路由专家并发执行",
+  "expected_verdict": "unavailable",
+  "verdict_keywords": [
+    "同引擎",
+    "重叠",
+    "串行",
+    "不成立",
+    "资源"
+  ],
+  "forbidden_claims": [
+    "可以并发",
+    "预期提升",
+    "双流并行能"
+  ],
+  "evidence_required": [
+    "import",
+    "call",
+    "command",
+    "error_output"
+  ],
+  "notes": "参考答案见 expect.md。要的是「重叠 0% 的实测」+ 机制，不是「理论上可以」。",
+  "needs_gpu": true
+}
