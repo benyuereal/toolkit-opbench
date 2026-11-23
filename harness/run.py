@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -119,6 +120,11 @@ def _next_attempt(base: str) -> tuple[int, str]:
 def prepare_cwd(task_id: str, arm: str) -> str:
     """建 runs/<arm>/<task>/attempt-N/ 并 chmod 777。返回 cwd。
 
+    目录名一律用 **definition.id**（不是调用时传的名字）。原因：目录名与
+    id 不一定相同（tasks/l5-asm-fmoe-a8 的 id 是 moe-asm-fmoe-l5），
+    若按传入名建目录，同一道题在不同臂下会落到两个目录，汇总时被当成
+    两道题——三臂配对就断了，Δ 永远算不出来。
+
     attempt-N 而不是直接覆盖：失败样本比成功样本信息量大，但复跑会
     破坏"固定预算"的可比性。所以保留每一次，且下游只认 attempt-1
     （见 select_attempt）——不续跑，但留证据。
@@ -196,15 +202,35 @@ def _quote_for_shell(argv: list[str]) -> str:
     return " ".join(shlex.quote(a) for a in argv)
 
 
+# 题面自己写明的预算（"时间预算：30 分钟"）。低于它的预算会切掉一个
+# 本来能完成的样本，测出来的是"我们给的时间不够"而不是"agent 不行"。
+# 这类样本会污染 Δ，所以直接拒绝，而不是跑完再解释。
+_STATED_BUDGET = re.compile(r"时间预算[：:]\s*\**\s*(\d+)\s*分钟")
+
+
+def stated_budget_s(task_md: str) -> int | None:
+    m = _STATED_BUDGET.search(task_md)
+    return int(m.group(1)) * 60 if m else None
+
+
 def run_one(task_id: str, arm: str, budget_s: int,
             max_usd: float = DEFAULT_MAX_USD, dry_run: bool = False) -> dict:
     arm = arm.upper()
     td = task_dir(task_id)
     defn = load_definition(td)
+    # 统一用 definition.id 作为一等标识：目录名可能只是它的旧称。
+    task_id = defn.id
     mod = _arm_module(arm)
 
     with open(os.path.join(td, "task.md"), encoding="utf-8") as f:
         task_md = f.read()
+    stated = stated_budget_s(task_md)
+    if stated is not None and budget_s < stated:
+        raise ValueError(
+            f"{task_id}: --budget {budget_s}s 低于题面写明的 {stated}s。"
+            "压预算会把本来能完成的样本切成 timeout，Δ 就被污染了。"
+            f"要么给足 {stated}s，要么改题面的预算说明（改题面要重新记哈希）"
+        )
     prompt = mod.build_prompt(task_md)
 
     from bench.check import integrity
@@ -470,6 +496,7 @@ def prepare_suite(suite_path: str, arms: list[str]) -> list[dict]:
         budget = int(spec.get("budget") or suite.get("budget_per_task") or 1800)
         td = task_dir(tid)  # 先解析，题不存在就在这一步失败，不要跑到一半
         defn = load_definition(td)
+        tid = defn.id  # 与 run_one 一致：目录名可能只是旧称
         for arm in arms:
             queue.append({
                 "task": tid,
