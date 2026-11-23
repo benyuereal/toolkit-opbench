@@ -1,0 +1,18 @@
+# 参考答案被产物推翻的记录
+#
+# 格式：ISO 时间 | 题 | 谁推翻的 | 复核方式 | 处置
+# 按 protocol.md 与各题 expect.md 的「例外」条款：agent 拿出可复现反证且被
+# 独立复核通过时，以它为准，参考答案作废。
+
+2026-11-23T12:37:00+08:00 | moe-asm-fmoe-l5 | arm-A attempt-1 | 人工独立复现（/tmp/verifyA/v.py，不复用 A 臂脚本） | expect.md 改写为「有条件可用」
+
+复核要点：
+  - 默认 mode=0, solidx=0 → RuntimeError: unsupport current input Mode: 0,Solution:0
+  - solidx 给 10000/20001 且 sorted_weights 位置传 topk_weights 原张量
+    → stage1 rel_l2 2.8e-3 / stage2 rel_l2 2.4e-3（对得上 A 臂的 1.7e-3 / 2.4e-3）
+  - 若传 moe_sorting 的 sorted_weights → stage2 rel_l2 0.64（静默错，与 A 臂一致）
+  - 结论：原答案的两条依据（dtype 被拒、mode 命名空间不匹配）都不成立；
+    真实原因是 config/solution 未命中。
+
+影响：该题从「反事实题」变成「条件发现题」，L5 的区分能力在本题上下降。
+报告里必须写明，不许隐去。

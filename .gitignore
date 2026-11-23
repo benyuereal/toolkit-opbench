@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
+
+# runs/ 是运行产物，但修正记录必须入库（审计要求，见 protocol.md）
+!runs/corrections.log
+!runs/leaks.log

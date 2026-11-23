@@ -3,19 +3,21 @@
   "kind": "judgment",
   "family": "moe",
   "tier": "L5",
-  "question": "在本机 gfx938 上，aiter.asm_fmoe_a8 能不能用于一层 w8a8 MoE 的融合计算",
-  "expected_verdict": "unavailable",
+  "question": "在本机 gfx938 上，aiter.asm_fmoe_a8 能否用于一层 w8a8 MoE 的计算；若能，条件是什么",
+  "expected_verdict": "conditional",
   "verdict_keywords": [
-    "不可用",
-    "不支持",
-    "unsupport"
+    "有条件可用",
+    "可用",
+    "solidx",
+    "10000",
+    "20001"
   ],
   "forbidden_claims": [
-    "可以融合",
+    "可以一步融合",
     "预期提升",
     "建议上线",
-    "可以直接用",
-    "能够融合"
+    "五段合一",
+    "完全融合"
   ],
   "evidence_required": [
     "import",
@@ -23,5 +25,5 @@
     "error_output",
     "command"
   ],
-  "notes": "题目目录沿用初始化时的 l5-asm-fmoe-a8；id 与 suites/*.yaml 中的 moe-asm-fmoe-l5 对齐。expect.md 是参考答案，不给 agent 看。"
+  "notes": "题目目录沿用 l5-asm-fmoe-a8；id 与 suites/*.yaml 的 moe-asm-fmoe-l5 对齐。2026-11-23 参考答案被 A 臂实测推翻并经独立复核（见 runs/corrections.log）：正确答案是「有条件可用」——必须显式给 mode+solidx，且不是一步融合。"
 }
