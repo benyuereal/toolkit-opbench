@@ -13,7 +13,7 @@
 空闲 600 MHz、boost 后 1200–1350 MHz，同一段代码在两个档位上差一倍。
 不记档位的历史数据无法与今天的数据比较——我们踩过三次。
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import statistics
 from typing import Callable
 
