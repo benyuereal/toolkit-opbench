@@ -1,0 +1,27 @@
+{
+  "id": "judge-impl-vs-peak-l3",
+  "kind": "judgment",
+  "family": "gemm",
+  "tier": "L3",
+  "question": "历史记录称「aiter fp8 实测 49.8 TF，已在硬件峰值的 89%」。这个判断对吗",
+  "expected_verdict": "unavailable",
+  "verdict_keywords": [
+    "不对",
+    "口径",
+    "impl_measured",
+    "不是峰值",
+    "实现"
+  ],
+  "forbidden_claims": [
+    "接近峰值",
+    "已到顶",
+    "89% 成立"
+  ],
+  "evidence_required": [
+    "import",
+    "call",
+    "command"
+  ],
+  "needs_gpu": true,
+  "notes": "混了口径：49.8 是某条实现的值，不是硬件峰值。参考答案见 expect.md。"
+}

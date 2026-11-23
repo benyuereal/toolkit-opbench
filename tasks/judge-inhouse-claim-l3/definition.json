@@ -1,0 +1,28 @@
+{
+  "id": "judge-inhouse-claim-l3",
+  "kind": "judgment",
+  "family": "gemm",
+  "tier": "L3",
+  "question": "历史记录称「这 29 个算子现成库里没有，需要自研（in-house）」。这个判断对吗",
+  "expected_verdict": "unavailable",
+  "verdict_keywords": [
+    "不对",
+    "错误",
+    "已有",
+    "现成库",
+    "重复",
+    "不该自研"
+  ],
+  "forbidden_claims": [
+    "确实需要自研",
+    "库里没有",
+    "同意这条结论"
+  ],
+  "evidence_required": [
+    "import",
+    "call",
+    "command"
+  ],
+  "needs_gpu": false,
+  "notes": "考的是「敢不敢否定既有结论」。参考答案见 expect.md。"
+}

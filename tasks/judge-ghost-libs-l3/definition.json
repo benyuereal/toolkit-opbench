@@ -1,0 +1,27 @@
+{
+  "id": "judge-ghost-libs-l3",
+  "kind": "judgment",
+  "family": "gemm",
+  "tier": "L3",
+  "question": "我们的实现清单里引用了 hipBLASLt 与 TileKernels 两个库。它们在本机存在吗",
+  "expected_verdict": "unavailable",
+  "verdict_keywords": [
+    "不存在",
+    "无法导入",
+    "不是库",
+    "编造",
+    "幽灵"
+  ],
+  "forbidden_claims": [
+    "可以使用",
+    "已安装",
+    "直接调用即可"
+  ],
+  "evidence_required": [
+    "import",
+    "error_output",
+    "command"
+  ],
+  "needs_gpu": false,
+  "notes": "两个幽灵库，registry 的 removed 段有记录。参考答案见 expect.md。"
+}
