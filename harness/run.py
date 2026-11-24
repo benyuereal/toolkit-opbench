@@ -226,10 +226,15 @@ def select_attempt(base: str) -> str | None:
     return first if os.path.isdir(first) else None
 
 
-def build_cmd(task_dir: str, budget_s: int, max_usd: float = DEFAULT_MAX_USD) -> list[str]:
+def build_cmd(task_dir: str, budget_s: int, max_usd: float = DEFAULT_MAX_USD,
+              plugin_dir: str | None = None) -> list[str]:
     """组命令。prompt 由 stdin 给，所以这里不含题面。
 
     模型与 effort 从 OPBENCH_* 环境变量取（见模块顶部），三臂一致。
+
+    `plugin_dir`：该臂 cwd 里的 plugin 根。**每个臂指向自己的副本**，
+    这样 skill 通过 Claude Code 的原生机制进入上下文，不靠 prompt 提示，
+    也不会串到别的臂。
     """
     cmd = [
         CLAUDE,
@@ -243,6 +248,8 @@ def build_cmd(task_dir: str, budget_s: int, max_usd: float = DEFAULT_MAX_USD) ->
     model = os.environ.get("OPBENCH_MODEL", "")
     if model:
         cmd += ["--model", model]
+    if plugin_dir:
+        cmd += ["--plugin-dir", plugin_dir]
     return cmd
 
 
@@ -394,6 +401,12 @@ def run_one(task_id: str, arm: str, budget_s: int,
     staged = list(mod.stage_files(cwd) or [])
     mounted = list(mod.mount(cwd) or []) if hasattr(mod, "mount") else []
 
+    # 该臂的 plugin 根（cwd 内副本）。只有声明了 PLUGIN_SUBDIR 的臂才有。
+    # **必须用 cwd 里的副本**，不能用共享源：loop.py 会往 <卡片>/runs/loop/ 写状态，
+    # 共享源会让三个臂互相污染，还会改写被测对象本身。
+    plugin_sub = getattr(mod, "PLUGIN_SUBDIR", None)
+    plugin_dir = os.path.join(cwd, plugin_sub) if plugin_sub else None
+
     record = {
         "task": task_id,
         "task_dir": os.path.relpath(td, ROOT),
@@ -427,7 +440,8 @@ def run_one(task_id: str, arm: str, budget_s: int,
     if dry_run:
         record["status"] = "dry-run"
         record["prompt_sha256"] = _sha(prompt)
-        record["cmd"] = _su_prefix(arm) + [_quote_for_shell(build_cmd(td, budget_s, max_usd))]
+        record["cmd"] = _su_prefix(arm) + [_quote_for_shell(
+            build_cmd(td, budget_s, max_usd, plugin_dir=plugin_dir))]
         _write_attempt_meta(cwd, record, prompt)
         return record
 
@@ -477,12 +491,14 @@ def run_one(task_id: str, arm: str, budget_s: int,
                 record["gpu_visible_env"] = os.environ.get("HIP_VISIBLE_DEVICES")
                 record["sclk_mhz"] = dcu.ramp_to_work_clock()
                 record["status"], record["exit_code"], record["wall_time_s"] = _execute(
-                    cwd, prompt, arm, budget_s, max_usd, record
+                    cwd, prompt, arm, budget_s, max_usd, record,
+                    plugin_dir=plugin_dir,
                 )
             record["sclk_end_mhz"] = dcu.current_sclk()
     else:
         record["status"], record["exit_code"], record["wall_time_s"] = _execute(
-            cwd, prompt, arm, budget_s, max_usd, record
+            cwd, prompt, arm, budget_s, max_usd, record,
+            plugin_dir=plugin_dir,
         )
 
     record["artifacts"] = _collect_artifacts(cwd)
@@ -498,12 +514,13 @@ def _sha(text: str) -> str:
 
 
 def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
-             max_usd: float, record: dict) -> tuple[str, int | None, float]:
+             max_usd: float, record: dict,
+             plugin_dir: str | None = None) -> tuple[str, int | None, float]:
     """跑一次 claude。返回 (status, exit_code, wall_time_s)。
 
     status ∈ ok / timeout / budget / error
     """
-    cmd = build_cmd(cwd, budget_s, max_usd)
+    cmd = build_cmd(cwd, budget_s, max_usd, plugin_dir=plugin_dir)
     env = os.environ.copy()
     env.update(_load_env())
 

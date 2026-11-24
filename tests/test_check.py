@@ -308,16 +308,39 @@ class TestArms(unittest.TestCase):
         self.assertNotIn("toolkit_skills", p)
 
     @unittest.skipUnless(os.path.isdir("/workspace/toolkit_skills"), "skill 未挂载")
-    def test_c_arm_symlinks_skill(self):
+    def test_c_arm_copies_skill_into_cwd(self):
+        """C 臂拷贝副本，不是软链共享源。
+
+        软链会让 loop.py 把状态写进共享的 <卡片>/runs/loop/，
+        三个臂互相污染，还改写被测对象本身。
+        """
         import tempfile
         from harness.arms import c
 
         with tempfile.TemporaryDirectory() as d:
-            mounted = c.mount(d)
-            self.assertEqual(mounted, ["skill"])
-            link = os.path.join(d, "skill")
-            self.assertTrue(os.path.islink(link))
-            self.assertEqual(os.path.realpath(link), os.path.realpath(c.SKILL_ROOT))
+            staged = c.stage_files(d)
+            self.assertIn("skill", staged)
+            dst = os.path.join(d, "skill")
+            self.assertTrue(os.path.isdir(dst))
+            self.assertFalse(os.path.islink(dst), "必须拷贝，不能软链到共享源")
+            self.assertNotEqual(os.path.realpath(dst), os.path.realpath(c.SKILL_ROOT))
+            # plugin 根必须可被 Claude Code 识别
+            self.assertTrue(os.path.isfile(
+                os.path.join(dst, "Plugins", "ops", ".claude-plugin", "plugin.json")))
+
+    @unittest.skipUnless(os.path.isdir("/workspace/toolkit_skills"), "skill 未挂载")
+    def test_c_arm_writes_claude_config(self):
+        import tempfile
+        from harness.arms import c
+
+        with tempfile.TemporaryDirectory() as d:
+            c.stage_files(d)
+            self.assertTrue(os.path.isfile(os.path.join(d, "CLAUDE.md")))
+            st = os.path.join(d, ".claude", "settings.local.json")
+            self.assertTrue(os.path.isfile(st))
+            import json
+            with open(st) as f:
+                self.assertIn("ops@dcu-toolkit-marketplace", f.read())
 
     @unittest.skipUnless(os.path.isdir("/workspace/toolkit_skills"), "skill 未挂载")
     def test_c_skill_version_recorded(self):
@@ -334,7 +357,7 @@ class TestArms(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, \
              unittest.mock.patch.object(c, "SKILL_ROOT", "/nonexistent/skill"):
             with self.assertRaises(FileNotFoundError):
-                c.mount(d)
+                c.stage_files(d)
 
 
 class TestArmBudgetComparability(unittest.TestCase):
@@ -605,15 +628,18 @@ class TestSkillHubArm(unittest.TestCase):
         from harness.arms import skillhub
         self.assertTrue(os.path.isdir(skillhub.SKILLHUB_ROOT))
 
-    def test_mount_symlinks_to_skillhub_not_toolkit(self):
+    def test_stage_copies_skillhub_and_adds_manifest(self):
         import tempfile
         from harness.arms import c, skillhub
         self.assertNotEqual(skillhub.SKILLHUB_ROOT, c.SKILL_ROOT)
         with tempfile.TemporaryDirectory() as d:
-            skillhub.mount(d)
-            link = os.path.join(d, "skillhub")
-            self.assertTrue(os.path.islink(link))
-            self.assertEqual(os.path.realpath(link), os.path.realpath(skillhub.SKILLHUB_ROOT))
+            skillhub.stage_files(d)
+            dst = os.path.join(d, "skillhub")
+            self.assertTrue(os.path.isdir(dst))
+            self.assertFalse(os.path.islink(dst))
+            # SkillHub 本身没有 plugin.json，副本里必须补上
+            self.assertTrue(os.path.isfile(
+                os.path.join(dst, ".claude-plugin", "plugin.json")))
 
     def test_prompt_structurally_same_as_c(self):
         """三臂只差资源声明，题面部分必须逐字相同。
@@ -640,4 +666,4 @@ class TestSkillHubArm(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, \
              mock.patch.object(skillhub, "SKILLHUB_ROOT", "/nonexistent/hub"):
             with self.assertRaises(FileNotFoundError):
-                skillhub.mount(d)
+                skillhub.stage_files(d)
