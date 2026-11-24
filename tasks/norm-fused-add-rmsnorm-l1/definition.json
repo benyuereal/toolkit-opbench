@@ -78,6 +78,7 @@
     "needs_gpu": true,
     "extra_args": [
       1e-06
-    ]
+    ],
+    "roofline_bandwidth": "peak_achievable:copy"
   }
 }

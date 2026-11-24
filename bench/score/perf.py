@@ -116,3 +116,32 @@ def rank(times: dict[str, float], defn, axes: dict) -> dict[str, PerfScore]:
         s.rel_ratio = best / t if t > 0 else 0.0
         out[arm] = s
     return out
+
+
+def roofline_floor_mixed(defn, axes: dict) -> tuple[float, str, float, float]:
+    """按读写比例选带宽口径的地板。
+
+    为什么不能只用 copy 或只用 read：本机 copy(R+W)=1350，read-only=1965。
+    rmsnorm 是 2读2写（读写各半），用 copy 口径合理；但实测 lightop 跑出
+    1362 GB/s 已经超过 1350 —— 说明它的实际读写比或访存效率比 copy 微基准好。
+    对这种算子，正确的做法是给一个区间：地板取两者之间，并注明口径。
+
+    返回 (地板ms, "bandwidth", 带宽地板ms, launch地板ms)，
+    带宽地板另用 defn.dcu.roofline_bandwidth 指定的 id（如 peak_achievable:copy）。
+    """
+    from bench.hw import constants as C
+
+    dcu = defn.dcu or {}
+    expr = dcu.get("work")
+    if not expr:
+        raise ValueError(f"{defn.id}: 缺 dcu.work")
+    work = eval(expr, {"__builtins__": {}}, dict(axes))
+    peak_id = dcu.get("roofline_bandwidth") or dcu.get("peak_constant")
+    peak = float(C.get(peak_id)["value"])
+    bw_ms = work / (peak * 1e9) * 1e3
+    try:
+        launch_ms = float(C.get("launch.floor_us")["value"]) / 1e3
+    except KeyError:
+        launch_ms = 0.0
+    floor = max(bw_ms, launch_ms)
+    return floor, "bandwidth" if bw_ms >= launch_ms else "launch", bw_ms, launch_ms

@@ -264,3 +264,56 @@ class TestEvidenceExtraction(unittest.TestCase):
                 json.dump({"rel_l2": 0.001}, f)
             ev = C._evidence_from(d, "")
         self.assertTrue(any(e.startswith("results/") for e in ev))
+
+
+class TestPerfExtraction(unittest.TestCase):
+    """耗时抽取：按形状分开，且不能把基准当结果。"""
+
+    def _run(self, results: dict) -> dict:
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "results"))
+            for name, obj in results.items():
+                with open(os.path.join(d, "results", name), "w", encoding="utf-8") as f:
+                    json.dump(obj, f)
+            return C._extract_t_ms(d)
+
+    def test_shape_separated(self):
+        got = self._run({"r.json": {"rows": [
+            {"M": 4096, "fused": {"median_ms": 0.10}},
+            {"M": 8192, "fused": {"median_ms": 0.20}},
+        ]}})
+        self.assertEqual(got["M=4096"], 0.10)
+        self.assertEqual(got["M=8192"], 0.20)
+
+    def test_baseline_keys_excluded(self):
+        """empty_loop_ms / launch_floor_ms 是参照物，不是被测结果。"""
+        got = self._run({"r.json": {
+            "empty_loop_ms": 0.00019, "launch_floor_ms": 0.043,
+            "rows": [{"M": 8192, "sgl_ms": 0.0405}],
+        }})
+        self.assertEqual(list(got.values()), [0.0405])
+
+    def test_returns_none_when_nothing(self):
+        self.assertIsNone(self._run({"r.json": {"foo": 1}}))
+
+
+class TestPerfScoring(unittest.TestCase):
+    def test_rel_and_roof(self):
+        from bench.score import perf
+        from bench.data import definition as defn_mod
+
+        d = defn_mod.Definition(
+            id="t", kind="kernel", family="g", tier="L1",
+            axes={"M": {"type": "const", "value": 4096}},
+            inputs={}, outputs={},
+            dcu={"work": "M*4096*2", "work_unit": "byte",
+                 "peak_constant": "peak_achievable:copy"},
+        )
+        # 三臂：快 / 中 / 慢
+        scores = perf.rank({"A": 0.10, "B": 0.20, "C": 0.40}, d, {"M": 4096})
+        self.assertAlmostEqual(scores["A"].rel_ratio, 1.0)
+        self.assertAlmostEqual(scores["B"].rel_ratio, 0.5)
+        self.assertAlmostEqual(scores["C"].rel_ratio, 0.25)
+        # roofline：同一地板，耗时的倒数关系
+        self.assertGreater(scores["A"].roof_ratio, scores["C"].roof_ratio)
+        self.assertEqual(scores["A"].floor_kind, "launch")  # 33MB 仍被 launch 支配

@@ -83,6 +83,21 @@ def _load_json(path: str) -> dict | None:
         return None
 
 
+def _task_dir_of(task_id: str, root: str) -> str | None:
+    """按 id 或目录名找题目录（目录名与 definition.id 可能不同）。"""
+    direct = os.path.join(root, "tasks", task_id)
+    if os.path.isfile(os.path.join(direct, "definition.json")):
+        return direct
+    for name in sorted(os.listdir(os.path.join(root, "tasks"))):
+        p = os.path.join(root, "tasks", name, "definition.json")
+        if name.startswith("_") or not os.path.isfile(p):
+            continue
+        d = _load_json(p)
+        if d and d.get("id") == task_id:
+            return os.path.join(root, "tasks", name)
+    return None
+
+
 def _definition_for(task_id: str) -> dict | None:
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     direct = os.path.join(root, "tasks", task_id, "definition.json")
@@ -225,6 +240,80 @@ def leak_hits(attempt_dir: str) -> dict[str, list[str]]:
     return leak.scan_dir(attempt_dir)
 
 
+def _extract_t_ms(attempt_dir: str) -> dict | None:
+    """从产物里抽被测实现的耗时，**按形状分开**。
+
+    返回 {shape_key: ms}，或 None。
+
+    为什么不能只返回一个数：不同 M 的耗时天差地别（rmsnorm M=16 是 38µs、
+    M=8192 是 203µs）。取 min 会拿最小形状跟别的臂的大形状比，比出个假排名。
+    这里按同名 axes（M/H 等）分组，跨臂比时只比**同名形状**。
+
+    只认结构化 results/*.json，不读散文报告——bench 的数必须可复核。
+    """
+    import glob
+
+    out: dict[str, float] = {}
+    for p in glob.glob(os.path.join(attempt_dir, "results", "*.json")):
+        try:
+            obj = json.load(open(p, encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for item, shape in _walk_dicts(obj):
+            t = item.get("timing")
+            ms = None
+            # 秒单位：B 臂用 median_s（实测踩过）
+            for k in ("median_s", "t_s"):
+                if isinstance(item.get(k), (int, float)) and not isinstance(item.get(k), bool):
+                    ms = float(item[k]) * 1e3
+                    break
+            if ms is None and isinstance(t, dict) and isinstance(t.get("median_ms"), (int, float)):
+                ms = float(t["median_ms"])
+            if ms is None:
+                # 兜底：认 "xxx_ms"，但**排除基准/对照类键**。
+                # 实测踩过：B 臂的 results 里有 empty_loop_ms=0.00019（空循环
+                # 基准）和 launch_floor_ms，把它们当 gating 耗时会让它"快 228 倍"。
+                # 这些数是参照物，不是被测结果。
+                SKIP = ("floor", "empty", "baseline", "ref", "torch", "unfused",
+                        "loop", "overhead")
+                cands = [v for k, v in item.items()
+                         if k.endswith("_ms") and isinstance(v, (int, float))
+                         and not isinstance(v, bool) and v > 0
+                         and not any(sk in k.lower() for sk in SKIP)]
+                if cands:
+                    ms = float(min(cands))
+            if ms is None:
+                continue
+            key = ",".join(f"{k}={v}" for k, v in sorted(shape.items())) or "default"
+            out.setdefault(key, ms)
+    return out or None
+
+
+def _shape_of(item: dict) -> dict:
+    """从 item 或它的嵌套容器里找形状字段。"""
+    out = {}
+    ax = item.get("axes")
+    if isinstance(ax, dict):
+        out.update({k: v for k, v in ax.items() if isinstance(v, int)})
+    for k in ("M", "H", "E", "TOPK", "N", "K"):
+        if k not in out and isinstance(item.get(k), int):
+            out[k] = item[k]
+    return out
+
+
+def _walk_dicts(obj, inherited: dict | None = None):
+    """递归产出 (dict, 继承的形状)。子节点的形状从父级继承并覆盖。"""
+    if isinstance(obj, dict):
+        sh = dict(inherited or {})
+        sh.update(_shape_of(obj))
+        yield obj, sh
+        for v in obj.values():
+            yield from _walk_dicts(v, sh)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _walk_dicts(v, inherited)
+
+
 def collect(runs_dir: str, isolated_root: str | None = None,
             only_tasks: list[str] | None = None) -> dict:
     """扫 runs/，返回 {tasks: [...], arms: [...], table: {(task,arm): row}, deltas}
@@ -285,11 +374,79 @@ def collect(runs_dir: str, isolated_root: str | None = None,
                 "halluc": hdetail,
                 "leaks": leaks,
                 "leaked": bool(leaks),
+                # 性能：从 results 抽耗时，稍后跨臂算相对/roofline 达成率
+                "t_ms": _extract_t_ms(d),
             }
             table[(task_id, arm)] = row
 
+    # ---- 性能评分：跨臂算相对达成率 + roofline 达成率 ----
+    perf_rows = _score_perf(table, tasks)
+
     deltas = _deltas(table, tasks)
-    return {"tasks": tasks, "arms": list(ARMS), "table": table, "deltas": deltas}
+    return {"tasks": tasks, "arms": list(ARMS), "table": table,
+            "deltas": deltas, "perf": perf_rows}
+
+
+def _score_perf(table: dict, tasks: list[str]) -> dict:
+    """每题：用三臂里最快的当分母算相对达成率，并算 roofline 达成率。
+
+    业主口径：性能占 80%，正确性硬门槛。这里只算性能部分，
+    正确性由 bench.check.correctness 单独判（不通过的题不进排名）。
+    """
+    from bench.data import definition as defn_mod
+    from bench.score import perf as perf_mod
+
+    out = {}
+    for task in tasks:
+        # 跨臂比"同名形状"：先找出三臂都有的形状键，只在那些键上比。
+        per_arm = {arm: table[(task, arm)].get("t_ms")
+                   for arm in ARMS
+                   if (task, arm) in table and not table[(task, arm)].get("leaked")}
+        per_arm = {a: v for a, v in per_arm.items() if isinstance(v, dict) and v}
+        if not per_arm:
+            continue
+        common = set.intersection(*[set(v) for v in per_arm.values()])
+        # 没有完全共同的形状时，退化为"各自最大形状"（大形状最能代表稳态）
+        if common:
+            shape_key = sorted(common, key=lambda k: len(k))[0] if len(common) == 1 else \
+                sorted(common)[0]
+            times = {a: v[shape_key] for a, v in per_arm.items() if shape_key in v}
+        else:
+            shape_key = "(无共同形状，各取最大档)"
+            def biggest(d):
+                return max(d.values())
+            times = {a: biggest(v) for a, v in per_arm.items()}
+        if not times:
+            continue
+        defn = _definition_for(task)
+        if not defn or defn.get("kind") != "kernel":
+            continue
+        # 用第一档 public 的 axes 算 roofline 地板
+        try:
+            root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            td = _task_dir_of(task, root)
+            if td is None:
+                continue
+            d_obj = defn_mod.load(os.path.join(td, "definition.json"))
+            from bench.data import workload as wl_mod
+            pub, _ = wl_mod.split(wl_mod.load(os.path.join(td, "workload.jsonl"), d_obj))
+            axes = dict(d_obj.const_axes()); axes.update(pub[0].axes)
+            scores = perf_mod.rank(times, d_obj, axes)
+        except Exception as e:
+            out[task] = {"error": f"{type(e).__name__}: {e}"}
+            continue
+        entry: dict = {"_shape": shape_key}
+        for arm, s in scores.items():
+            entry[arm] = {
+                "t_ms": round(s.t_ms, 5),
+                "rel_ratio": round(s.rel_ratio, 4),
+                "roof_ratio": round(s.roof_ratio, 4),
+                "floor_ms": round(s.floor_ms, 5),
+                "floor_kind": s.floor_kind,
+                "note": s.note,
+            }
+        out[task] = entry
+    return out
 
 
 def _pct(rows: list[dict], key: str) -> float | None:
@@ -412,6 +569,40 @@ def render_report(table: dict, template: str | None = None) -> str:
         v = d.get(key)
         lines.append(f"- {label}: " + ("—" if v is None else f"{v:+.2f}"))
     lines.append("")
+
+    # ---- 性能（80% 权重）：主表 ----
+    perf = table.get("perf") or {}
+    if perf:
+        lines.append("## 性能（bench 主指标，权重 80%）")
+        lines.append("")
+        lines.append("> 正确性是**硬门槛**：不通过该题的臂不进这张表。")
+        lines.append("> 相对达成 = 本批最快 / 本臂；roofline = 地板 / 本臂。")
+        lines.append("")
+        lines.append("| 题 | 形状 | 臂 | 耗时 ms | 相对达成 | roofline | 地板 ms | 支配项 |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for task, entry in perf.items():
+            if "error" in entry:
+                lines.append(f"| {task} | — | — | — | — | — | — | {entry['error']} |")
+                continue
+            shape = entry.get("_shape", "")
+            for arm in ARMS:
+                r = entry.get(arm)
+                if not isinstance(r, dict):
+                    continue
+                lines.append(
+                    f"| {task} | {shape} | {arm} | {r['t_ms']:.5f} | "
+                    f"{r['rel_ratio']*100:.1f}% | {r['roof_ratio']*100:.1f}% | "
+                    f"{r['floor_ms']:.5f} | {r['floor_kind']} |"
+                )
+        lines.append("")
+        notes = [(t, a, r["note"]) for t, e in perf.items()
+                 if isinstance(e, dict) for a, r in e.items()
+                 if isinstance(r, dict) and r.get("note")]
+        if notes:
+            lines.append("**口径警告**（这些数先核对计时方式再用）：")
+            for t, a, n in notes:
+                lines.append(f"- {t} / {a}：{n}")
+            lines.append("")
 
     lines.append("## 逐题判定理由")
     lines.append("")
