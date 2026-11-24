@@ -184,3 +184,69 @@ class TestCheckAll(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIntegerExact(unittest.TestCase):
+    """整数输出必须精确相等，不能套浮点容差。"""
+
+    @unittest.skipUnless(_has_gpu(), "需要 GPU")
+    def test_index_off_by_one_fails(self):
+        """索引差 1 是不同元素，必须判失败（不能被 atol 放过）。"""
+        import torch
+        from bench.data import definition as defn_mod
+        from bench.data import workload as wl_mod
+
+        d = defn_mod.Definition(
+            id="t", kind="kernel", family="g", tier="L1",
+            axes={"M": {"type": "var", "domain": {"values": [8]}},
+                  "E": {"type": "const", "value": 16}},
+            inputs={"x": {"shape": ["M", "E"], "dtype": "float32"}},
+            outputs={"w": {"shape": ["M", "E"], "dtype": "float32"},
+                     "i": {"shape": ["M", "E"], "dtype": "int32"}},
+            tolerance={"rtol": 1e-2, "atol": 1e-2}, reference="reference.py",
+        )
+        ws = [wl_mod.Workload("p", {"M": 8}, {}, "public"),
+              wl_mod.Workload("h", {"M": 8}, {}, "holdout")]
+
+        class Ref:
+            @staticmethod
+            def arun(x):
+                w = x.float()
+                return w, torch.arange(x.shape[1], dtype=torch.int32,
+                                       device=x.device).expand(x.shape[0], -1).contiguous()
+
+        # 索引整体 +1：数值差 1，必须失败
+        def bad(t):
+            w, i = Ref.arun(t["x"])
+            return w, i + 1
+
+        r = C.check_all(d, ws, bad, Ref())
+        self.assertFalse(r.ok, "索引差 1 必须判失败")
+        self.assertIn("整数输出", r.note)
+
+    @unittest.skipUnless(_has_gpu(), "需要 GPU")
+    def test_pressure_skipped_for_int_outputs(self):
+        """有整数输出的题跳过压力档：饱和输入下 top-k 索引无唯一解。"""
+        import torch
+        from bench.data import definition as defn_mod
+        from bench.data import workload as wl_mod
+
+        d = defn_mod.Definition(
+            id="t", kind="kernel", family="g", tier="L1",
+            axes={"M": {"type": "var", "domain": {"values": [8]}},
+                  "E": {"type": "const", "value": 16}},
+            inputs={"x": {"shape": ["M", "E"], "dtype": "float32"}},
+            outputs={"i": {"shape": ["M", "E"], "dtype": "int32"}},
+            tolerance={"rtol": 1e-2, "atol": 1e-2}, reference="reference.py",
+        )
+        ws = [wl_mod.Workload("p", {"M": 8}, {}, "public"),
+              wl_mod.Workload("h", {"M": 8}, {}, "holdout")]
+
+        class Ref:
+            @staticmethod
+            def arun(x):
+                return torch.argsort(-x, dim=-1).to(torch.int32)
+
+        r = C.check_all(d, ws, lambda t: Ref.arun(t["x"]), Ref())
+        # 若没跳过压力档，×1e4 会让并列导致失败
+        self.assertTrue(r.ok, r.note)

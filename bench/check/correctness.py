@@ -152,8 +152,33 @@ def check_all(defn, workloads, solution_fn, ref_module) -> Result:
                 actual = actual[0]
         if isinstance(actual, (list, tuple)):
             exps = expected if isinstance(expected, (list, tuple)) else [expected]
+            if len(actual) != len(exps):
+                return Result(
+                    ok=False, failed_workloads=["output-count"],
+                    note=f"输出个数不符：actual {len(actual)} vs expected {len(exps)}",
+                )
             res = Result(ok=True)
-            for a, e in zip(actual, exps):
+            for idx, (a, e) in enumerate(zip(actual, exps)):
+                # 整数输出（top-k 索引、token id、flags）**必须精确相等**。
+                # 套浮点容差是错的：索引差 1 是完全不同的元素，而
+                # atol=0.01+rtol 会把 54 个"差 1"的索引判成超差 —— 反过来
+                # 若 atol 调大又会放过大错。这里按 dtype 分流。
+                is_int = (not isinstance(a, float)) and hasattr(a, "dtype") and \
+                         (not a.dtype.is_floating_point)
+                if is_int:
+                    e_int = e.to(a.dtype) if hasattr(e, "to") else e
+                    if a.shape != e_int.shape:
+                        return Result(ok=False, failed_workloads=["shape"],
+                                      note=f"输出[{idx}] shape 不符："
+                                           f"{tuple(a.shape)} vs {tuple(e_int.shape)}")
+                    n_bad = int((a != e_int).sum().item())
+                    if n_bad:
+                        return Result(
+                            ok=False, failed_workloads=[f"整数输出[{idx}] {n_bad} 个不等"],
+                            note=f"整数输出[{idx}] 有 {n_bad}/{a.numel()} 个元素不相等"
+                                 "（索引/ID 必须精确匹配，不适用浮点容差）",
+                        )
+                    continue
                 r = compare(a, e, tol)
                 if not r.ok:
                     return r
@@ -177,12 +202,23 @@ def check_all(defn, workloads, solution_fn, ref_module) -> Result:
             notes.append(r.note)
     # 压力数值只在 public 上跑：holdout 已覆盖"未提交形状"，
     # 两者叠加会让跑一次的成本翻倍，而信息量不增加。
-    for w in pub:
-        for kind in _PRESSURE:
-            r = _run_one(w, pressure=kind)
-            if not r.ok:
-                failed.append(f"pressure[{kind}]:{w.uuid}")
-                notes.append(r.note)
+    #
+    # 但**有整数输出的题要跳过压力档**。实测教训：moe-gating 把输入 ×1e4 后，
+    # softmax 直接饱和成 one-hot，第 k 名之后全是 0、完全并列，top-k 索引
+    # 谁先谁后都对。这时各实现给出的索引集合相同但顺序不同，
+    # 拿"索引必须精确相等"去判会把正确的实现判成失败。
+    # 整数输出（索引/ID）在饱和输入下本来就没有唯一解，测它没有意义。
+    has_int_output = any(
+        (not spec.get("dtype", "").startswith("float"))
+        for spec in (defn.outputs or {}).values()
+    )
+    if not has_int_output:
+        for w in pub:
+            for kind in _PRESSURE:
+                r = _run_one(w, pressure=kind)
+                if not r.ok:
+                    failed.append(f"pressure[{kind}]:{w.uuid}")
+                    notes.append(r.note)
 
     return Result(
         ok=not failed,
