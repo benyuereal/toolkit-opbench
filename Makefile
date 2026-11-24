@@ -14,6 +14,7 @@ OUT     ?= reports
 help:
 	@echo "make test                 跑单测（无需 GPU）"
 	@echo "make doctor               环境体检（GPU/库/时钟/锁频/L2）"
+	@echo "make ready                bench 自检（题目/基线/工具链）"
 	@echo "make prepare SUITE=x      展开 (task, arm) 队列"
 	@echo "make run SUITE=x ARM=c    执行一个臂"
 	@echo "make verify RUNS=runs     验证产物（只认产物，不信自报）"
@@ -27,6 +28,10 @@ test:
 
 doctor:
 	$(PY) -m harness.doctor
+
+# bench 自检：题目 / 基线 / 工具链 是否就绪（不开跑）
+ready:
+	$(PY) -m harness.ready
 
 prepare:
 	$(PY) -m harness.run --suite $(SUITE) --arm $(ARM) --prepare

@@ -319,9 +319,27 @@ def render(table: dict) -> str:
     return "\n".join(lines)
 
 
+USAGE = """opbench doctor — 这台机器现在能不能测
+
+用法:
+  python3 -m harness.doctor          打印体检表
+  python3 -m harness.doctor --json   机器可读
+
+退出码: 0 可以测（可能有 warn） / 1 有 fail 项
+
+注意: 体检会跑 GPU 负载（event_timing）并实测锁频能力，
+      在 GPU 忙时会跳过锁频探针，整表约需 10–60 秒。
+"""
+
+
 def main(argv=None) -> int:
     """返回进程退出码：有 fail 才非 0；warn 不影响退出码（能测）。"""
     argv = list(sys.argv[1:] if argv is None else argv)
+    # --help 必须立即返回：体检本身要跑 GPU 负载，若在这里 hang 住，
+    # 任何想"探一下有没有这个工具"的脚本都会被卡（harness.ready 就被卡过）。
+    if any(a in ("-h", "--help") for a in argv):
+        print(USAGE)
+        return 0
     table = run()
     if "--json" in argv:
         print(json.dumps(table, ensure_ascii=False, indent=2))

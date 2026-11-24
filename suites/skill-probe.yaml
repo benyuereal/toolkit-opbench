@@ -1,0 +1,17 @@
+# 测 skill 价值的探针套件
+#
+# 选题原则：答案**不能靠 dir() 或读一个 API 文档得到**，必须依赖
+# 「本机踩过的坑」或「判据」。这类知识只有 skill 里有，裸 agent 探测不到。
+#
+# 与 smoke 的区别：smoke 是回归（证明 bench 没坏），skill-probe 是
+# 对照实验（证明 skill 有没有价值）。两者用途不同，别混。
+name: skill-probe
+description: 三道最能区分 skill 与裸 agent 的题
+needs_gpu_mixed: true
+tasks:
+  # 形状约束(topk 必须 128 倍数) + -1 哨兵语义，都要实测或读 skill 才知道
+  - {id: mla-sparse-l1, tier: L1, budget: 1800, needs_gpu: true}
+  # 「29 个算子需要自研」是错的——裸 agent 没有"这条被推翻过"的记忆
+  - {id: judge-inhouse-claim-l3, tier: L3, budget: 1200, needs_gpu: false}
+  # 49.8 是 impl_measured 不是峰值——混口径是历史事故
+  - {id: judge-impl-vs-peak-l3, tier: L3, budget: 1800, needs_gpu: true}
