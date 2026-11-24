@@ -1,0 +1,98 @@
+{
+  "id": "mla-sparse-l1",
+  "kind": "kernel",
+  "family": "attn-mla",
+  "tier": "L1",
+  "precision": [
+    "bfloat16"
+  ],
+  "axes": {
+    "S": {
+      "type": "var",
+      "domain": {
+        "values": [
+          512,
+          1024,
+          2048
+        ]
+      }
+    },
+    "H": {
+      "type": "const",
+      "value": 16
+    },
+    "SKV": {
+      "type": "const",
+      "value": 8192
+    },
+    "TOPK": {
+      "type": "const",
+      "value": 256
+    },
+    "D": {
+      "type": "const",
+      "value": 576
+    },
+    "KVG": {
+      "type": "const",
+      "value": 1
+    },
+    "DV": {
+      "type": "const",
+      "value": 512
+    }
+  },
+  "inputs": {
+    "q": {
+      "shape": [
+        "S",
+        "H",
+        "D"
+      ],
+      "dtype": "bfloat16"
+    },
+    "kv": {
+      "shape": [
+        "SKV",
+        "KVG",
+        "D"
+      ],
+      "dtype": "bfloat16"
+    },
+    "indices": {
+      "shape": [
+        "S",
+        "KVG",
+        "TOPK"
+      ],
+      "dtype": "int32"
+    }
+  },
+  "outputs": {
+    "out": {
+      "shape": [
+        "S",
+        "H",
+        "DV"
+      ],
+      "dtype": "bfloat16"
+    }
+  },
+  "tolerance": {
+    "rtol": 0.02,
+    "atol": 0.01
+  },
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:read",
+    "baseline_impl": "flash_mla.flash_mla_sparse_fwd",
+    "work": "S*TOPK*D*2 + S*H*512*2",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true,
+    "extra_args": [
+      0.041666666666666664,
+      512
+    ]
+  }
+}

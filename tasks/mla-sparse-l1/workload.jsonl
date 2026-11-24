@@ -1,0 +1,3 @@
+{"axes": {"S": 512}, "inputs": {"q": {"type": "random"}, "kv": {"type": "random"}, "indices": {"type": "random"}}, "uuid": "pub-S512", "split": "public"}
+{"axes": {"S": 2048}, "inputs": {"q": {"type": "random"}, "kv": {"type": "random"}, "indices": {"type": "random"}}, "uuid": "pub-S2048", "split": "public"}
+{"axes": {"S": 1024}, "inputs": {"q": {"type": "random"}, "kv": {"type": "random"}, "indices": {"type": "random"}}, "uuid": "hold-S1024", "split": "holdout"}
