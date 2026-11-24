@@ -24,7 +24,7 @@ import json
 import os
 import re
 
-ARMS = ("A", "B", "C")
+ARMS = ("A", "B", "C", "D")
 ATTEMPT = "attempt-1"
 
 

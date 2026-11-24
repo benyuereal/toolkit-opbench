@@ -1,0 +1,17 @@
+# 三向对照：裸 CC / SkillHub+CC / toolkit-skills+CC
+#
+# 三臂定义（见 harness/arms/）：
+#   A  裸 Claude Code              — 只有题面
+#   D  SkillHub + CC               — + /workspace/SkillHub（团队共享 44 个 skill）
+#   C  toolkit-skills + CC         — + /workspace/toolkit_skills（我们的算子知识库）
+#
+# 为什么把 SkillHub 编成 D 而不是 B：
+#   B 是"只有库清单"的中间臂，用来隔离"知道有哪些库"这一层价值。
+#   D 是另一个完整的知识层，与 C 并列，不是梯度关系。
+name: three-way
+description: 裸 CC vs SkillHub vs toolkit-skills，三个场景
+needs_gpu: true
+tasks:
+  - {id: moe-gating-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: norm-fused-add-rmsnorm-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: mla-sparse-l1, tier: L1, budget: 1800, needs_gpu: true}

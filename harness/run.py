@@ -81,9 +81,9 @@ def _now() -> str:
 
 
 def _arm_module(arm: str):
-    from harness.arms import a, b, c
+    from harness.arms import a, b, c, skillhub
 
-    return {"A": a, "B": b, "C": c}[arm.upper()]
+    return {"A": a, "B": b, "C": c, "D": skillhub}[arm.upper()]
 
 
 def task_dir(task_id: str) -> str:
@@ -419,10 +419,10 @@ def run_one(task_id: str, arm: str, budget_s: int,
         "stderr_bytes": 0,
     }
 
-    if arm == "C":
-        from harness.arms import c as c_mod
-
-        record["skill_version"] = c_mod.skill_version()
+    # 有 skill_version() 的臂（C=toolkit_skills, D=SkillHub）都要记版本。
+    # 不记的话"这一轮看的是哪个版本的知识库"无从追溯，跨轮比较不成立。
+    if hasattr(mod, "skill_version"):
+        record["skill_version"] = mod.skill_version()
 
     if dry_run:
         record["status"] = "dry-run"
@@ -765,7 +765,7 @@ def prepare_suite(suite_path: str, arms: list[str]) -> list[dict]:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="opbench-run")
     p.add_argument("--task")
-    p.add_argument("--arm", choices=["A", "B", "C", "a", "b", "c"])
+    p.add_argument("--arm", choices=["A", "B", "C", "D", "a", "b", "c", "d"])
     p.add_argument("--budget", type=int, default=1800)
     p.add_argument("--max-usd", type=float, default=DEFAULT_MAX_USD)
     p.add_argument("--suite")

@@ -596,3 +596,48 @@ class TestTaskFilesTracked(unittest.TestCase):
                 if rel not in tracked:
                     missing.append(rel)
         self.assertEqual(missing, [], f"这些题目文件没进 git：{missing}")
+
+
+class TestSkillHubArm(unittest.TestCase):
+    """D 臂（SkillHub）必须挂到不同的根，且三臂提示词结构一致。"""
+
+    def test_skillhub_root_exists(self):
+        from harness.arms import skillhub
+        self.assertTrue(os.path.isdir(skillhub.SKILLHUB_ROOT))
+
+    def test_mount_symlinks_to_skillhub_not_toolkit(self):
+        import tempfile
+        from harness.arms import c, skillhub
+        self.assertNotEqual(skillhub.SKILLHUB_ROOT, c.SKILL_ROOT)
+        with tempfile.TemporaryDirectory() as d:
+            skillhub.mount(d)
+            link = os.path.join(d, "skillhub")
+            self.assertTrue(os.path.islink(link))
+            self.assertEqual(os.path.realpath(link), os.path.realpath(skillhub.SKILLHUB_ROOT))
+
+    def test_prompt_structurally_same_as_c(self):
+        """三臂只差资源声明，题面部分必须逐字相同。
+
+        用不含 '---' 的题面做夹具：build_prompt 用 '---' 分隔题面与
+        资源声明，夹具里若含 '---'，rsplit 会切错位置。
+        """
+        from harness.arms import a, c, skillhub
+        task = "# 题目\n\n背景说明。\n"
+        for m in (a, c, skillhub):
+            head = m.build_prompt(task).rsplit("---", 1)[0].strip()
+            self.assertEqual(head, task.strip())
+
+    def test_version_recorded(self):
+        from harness.arms import skillhub
+        v = skillhub.skill_version()
+        self.assertEqual(v["root"], skillhub.SKILLHUB_ROOT)
+        self.assertIsNotNone(v["git_head"], "git_head 读不到说明 safe.directory 没配")
+
+    def test_missing_root_raises(self):
+        import tempfile
+        from unittest import mock
+        from harness.arms import skillhub
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(skillhub, "SKILLHUB_ROOT", "/nonexistent/hub"):
+            with self.assertRaises(FileNotFoundError):
+                skillhub.mount(d)
