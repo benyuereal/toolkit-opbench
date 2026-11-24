@@ -65,7 +65,11 @@
         "KVG",
         "TOPK"
       ],
-      "dtype": "int32"
+      "dtype": "int32",
+      "low": 0,
+      "high": "SKV",
+      "invalid_ratio": 0.3,
+      "invalid_value": -1
     }
   },
   "outputs": {

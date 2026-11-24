@@ -380,3 +380,61 @@ class TestCorrectionLog(unittest.TestCase):
             parts = line.split("|")
             self.assertGreaterEqual(len(parts), 5, line)
             self.assertTrue(parts[1].strip(), "条目必须写题目 id")
+
+
+class TestIndexInputs(unittest.TestCase):
+    """整数索引输入的范围与哨兵值必须由题面声明。
+
+    实测事故：mla-sparse-l1 的 indices 默认生成 randint(0,8)，
+    SKV=8192 却只出 0–7，且一个 -1 都没有——哨兵语义（本题三大考点之一）
+    根本没被触发。
+    """
+
+    def _defn(self, **ind_spec):
+        spec = {"shape": ["M", "TOPK"], "dtype": "int32"}
+        spec.update(ind_spec)
+        return defn_mod.Definition(
+            id="t", kind="kernel", family="g", tier="L1",
+            axes={"M": {"type": "const", "value": 16},
+                  "SKV": {"type": "const", "value": 8192},
+                  "TOPK": {"type": "const", "value": 256}},
+            inputs={"idx": spec}, outputs={},
+            tolerance={"rtol": 1e-2, "atol": 1e-2}, reference="reference.py",
+        )
+
+    def _build(self, d):
+        w = wl_mod.Workload("u1", {}, {"idx": {"type": "random"}}, "public")
+        return wl_mod.build_inputs(w, d)["idx"]
+
+    def test_high_accepts_axis_name(self):
+        d = self._defn(low=0, high="SKV")
+        idx = self._build(d)
+        self.assertGreaterEqual(int(idx.max()), 1000)   # 远超默认的 8
+        self.assertLess(int(idx.max()), 8192)
+
+    def test_invalid_ratio_inserts_sentinel(self):
+        d = self._defn(low=0, high="SKV", invalid_ratio=0.3, invalid_value=-1)
+        idx = self._build(d)
+        frac = float((idx == -1).float().mean())
+        self.assertGreater(frac, 0.2)
+        self.assertLess(frac, 0.4)
+
+    def test_no_sentinel_when_not_declared(self):
+        d = self._defn(low=0, high="SKV")
+        idx = self._build(d)
+        self.assertEqual(int((idx < 0).sum()), 0)
+
+    def test_bad_axis_raises(self):
+        d = self._defn(low=0, high="NOSUCH")
+        with self.assertRaises(ValueError):
+            self._build(d)
+
+    def test_high_must_exceed_low(self):
+        d = self._defn(low=100, high=10)
+        with self.assertRaises(ValueError):
+            self._build(d)
+
+    def test_reproducible_with_sentinel(self):
+        import torch
+        d = self._defn(low=0, high="SKV", invalid_ratio=0.3)
+        self.assertTrue(torch.equal(self._build(d), self._build(d)))

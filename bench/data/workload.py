@@ -139,7 +139,22 @@ def _dtype(name: str):
 
 def build_inputs(w: Workload, d) -> dict:
     """按 inputs 声明造张量。要支持 type=random / zeros / scalar。
-    生成必须可复现（固定 seed 由 uuid 派生）。"""
+    生成必须可复现（固定 seed 由 uuid 派生）。
+
+    ## 整数张量的取值范围必须由题面声明
+
+    默认 `randint(0, 8)` 对"索引"类输入是错的：`mla-sparse-l1` 的
+    `indices` 必须是 [0, SKV) 范围，而且哨兵 `-1` 要按比例出现。
+    实测踩过：默认生成只产出 0–7，SKV=8192，且一个 -1 都没有——
+    哨兵语义（本题三大考点之一）根本不被触发。
+
+    所以在 definition.inputs.<name> 里可以声明：
+
+      "low": 0,               # 下界（含）
+      "high": "SKV",          # 上界（不含），可以是轴名
+      "invalid_ratio": 0.3,   # 额外按此比例填入 "invalid_value"
+      "invalid_value": -1
+    """
     import torch
 
     axes = dict(d.const_axes())
@@ -147,6 +162,15 @@ def build_inputs(w: Workload, d) -> dict:
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     gen = torch.Generator(device=dev)
     gen.manual_seed(_seed_of(w.uuid))
+
+    def _resolve(v, default):
+        if v is None:
+            return default
+        if isinstance(v, str):
+            if v not in axes:
+                raise ValueError(f"inputs 的边界引用了未声明的轴 {v!r}")
+            return axes[v]
+        return int(v)
 
     tensors: dict = {}
     for name, spec in (d.inputs or {}).items():
@@ -159,7 +183,17 @@ def build_inputs(w: Workload, d) -> dict:
             if dt.is_floating_point:
                 x = torch.randn(shape, dtype=dt, device=dev, generator=gen)
             else:
-                x = torch.randint(0, 8, shape, dtype=dt, device=dev, generator=gen)
+                lo = _resolve(spec.get("low"), 0)
+                hi = _resolve(spec.get("high"), 8)
+                if hi <= lo:
+                    raise ValueError(
+                        f"inputs.{name}: high({hi}) 必须大于 low({lo})")
+                x = torch.randint(lo, hi, shape, dtype=dt, device=dev, generator=gen)
+                ratio = spec.get("invalid_ratio")
+                if ratio:
+                    val = spec.get("invalid_value", -1)
+                    mask = torch.rand(shape, device=dev, generator=gen) < float(ratio)
+                    x = torch.where(mask, torch.full_like(x, int(val)), x)
         elif t == "zeros":
             x = torch.zeros(shape, dtype=dt, device=dev)
         elif t == "ones":
