@@ -41,6 +41,22 @@
 - 输入生成必须可复现：seed 由 `uuid` 派生
 - **形状要有不整齐的**（如 13312 而非 16384），破对齐假设——整齐形状容易被「刚好对齐」的写法骗到
 
+`inputs.<name>` 可用的生成选项：
+
+| 选项 | 作用 |
+|---|---|
+| `{"type": "random"}` | 浮点 `randn`，整型 `randint(0, 8)` |
+| `{"type": "zeros"}` / `"ones"` / `"arange"` | 定值 |
+| `{"type": "scalar", "value": v}` | 填满标量 |
+| `"low"` / `"high"`（写在 `definition.inputs`） | 整型取值域，`high` 可用轴名 |
+| `"invalid_ratio"` / `"invalid_value"` | 按比例插入哨兵（如 `-1`） |
+| `{"type": "random", "positive": true}` | 浮点取 `|randn|`，**用于物理上非负的输入** |
+
+`positive` 不是"把输入做得简单了"：`mhc-post-l1` 的 `comb` 是 Sinkhorn
+的输出（非负、行和≈1）、`post` 过 sigmoid。用 `randn` 造出负的混合权重，
+4 项相加会互相抵消到 1e-8——这时正确性判据退化成"谁的舍入误差更小"，
+和实现质量无关。**别造物理上不存在的输入。**
+
 ### `solution.json` —— 提交
 
 ```json
