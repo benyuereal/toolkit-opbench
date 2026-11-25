@@ -1,0 +1,4 @@
+{"axes": {"M": 4096}, "inputs": {"x": {"type": "random"}, "residual": {"type": "random"}, "post": {"type": "random", "positive": true}, "comb": {"type": "random", "positive": true}}, "uuid": "pub-4096", "split": "public"}
+{"axes": {"M": 1024}, "inputs": {"x": {"type": "random"}, "residual": {"type": "random"}, "post": {"type": "random", "positive": true}, "comb": {"type": "random", "positive": true}}, "uuid": "pub-decode-1024", "split": "public"}
+{"axes": {"M": 16384}, "inputs": {"x": {"type": "random"}, "residual": {"type": "random"}, "post": {"type": "random", "positive": true}, "comb": {"type": "random", "positive": true}}, "uuid": "pub-prefill-16384", "split": "public"}
+{"axes": {"M": 8192}, "inputs": {"x": {"type": "random"}, "residual": {"type": "random"}, "post": {"type": "random", "positive": true}, "comb": {"type": "random", "positive": true}}, "uuid": "hold-8192", "split": "holdout"}

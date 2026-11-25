@@ -1,0 +1,33 @@
+{
+  "id": "mhc-post-l1",
+  "kind": "kernel",
+  "family": "mhc",
+  "tier": "L1",
+  "precision": ["bfloat16"],
+  "axes": {
+    "M": {"type": "var", "domain": {"values": [1024, 4096, 16384]}},
+    "H": {"type": "const", "value": 4096},
+    "HC": {"type": "const", "value": 4},
+    "NCMB": {"type": "const", "value": 16}
+  },
+  "inputs": {
+    "x": {"shape": ["M", "H"], "dtype": "bfloat16"},
+    "residual": {"shape": ["M", "HC", "H"], "dtype": "bfloat16"},
+    "post": {"shape": ["M", "HC"], "dtype": "float32"},
+    "comb": {"shape": ["M", "NCMB"], "dtype": "float32"}
+  },
+  "outputs": {
+    "out": {"shape": ["M", "HC", "H"], "dtype": "bfloat16"}
+  },
+  "tolerance": {"rtol": 0.05, "atol": 0.02},
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:copy",
+    "roofline_bandwidth": "peak_achievable:copy",
+    "baseline_impl": "harness.implementations.sglang_mhc_post",
+    "work": "M*H*2 + M*HC*H*2 + M*HC*H*2 + M*HC*4 + M*NCMB*4",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true
+  }
+}

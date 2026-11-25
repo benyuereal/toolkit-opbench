@@ -182,6 +182,13 @@ def build_inputs(w: Workload, d) -> dict:
         if t == "random":
             if dt.is_floating_point:
                 x = torch.randn(shape, dtype=dt, device=dev, generator=gen)
+                # 某些输入在真实模型里**不可能是负的**，拿 randn 造会造出物理上
+                # 不存在的算子：`mhc-post-l1` 的 `comb` 是 Sinkhorn 的输出
+                # （非负、行和≈1），`post` 过 sigmoid（∈[0,2]）。负的混合权重
+                # 会让 4 项互相抵消到 1e-8，正确性判据就变成"谁的舍入误差更小"。
+                # 声明 `positive: true` 取 |randn|，与真实分布同号同量级。
+                if decl.get("positive"):
+                    x = x.abs()
             else:
                 lo = _resolve(spec.get("low"), 0)
                 hi = _resolve(spec.get("high"), 8)

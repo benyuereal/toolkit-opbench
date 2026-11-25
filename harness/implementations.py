@@ -162,6 +162,45 @@ def aiter_moe_sum(expert_out):
     return out
 
 
+def sglang_mhc_post(x, residual, post, comb):
+    """GLM-5.3-Flash 的 mHC 后处理，走 sglang 自带的 tilelang 实现。
+
+        out[m, i, h] = post[m, i] * x[m, h]
+                     + Σ_j comb[m, i*4 + j] * residual[m, j, h]
+
+    ## 签名对不上的地方
+
+    `mhc_post_tilelang(a, b, c, d, x, hc, hidden, n_thr=128, h_blk=1024)`——
+    位置参数有 9 个，其中**第 5 个才是要写的 output 缓冲区**，前四个是
+    `comb.view(-1,4,4)` / `residual` / `post.squeeze(-1)` / `x`。这个顺序
+    在 sglang 源码里是 `_post[m,4,cdiv(h,256)](x,residual,post,comb,o,h,256)`，
+    和 Python 包装器的参数顺序**不一致**，不要照着 kernel 的调用抄。
+
+    `b_post`（同名）是另一个不复用缓冲区的版本，题面不给它开洞：本题的
+    基线是**带缓冲区的生产路径**，这是 mHC 在服务里真实的调用形态。
+
+    ## 计时口径
+
+    `torch.empty_like(residual)` 在计时窗口之外——那是调用者的分配，不是
+    这个 kernel 的成本。这与 `lightop_add_rmsnorm_swiglu` 的口径一致。
+
+    ## 为什么拿它当基线
+
+    本机实测默认参数下它只跑到 653 GB/s（m=4096，9H 口径），而同一份实现
+    只调 `n_thr`/`h_blk` 就能到 1106 GB/s —— 说明它的分块对形状很敏感。
+    这不是"实现写错了"，是**参数没跟着形状走**，正好是 L1 题该暴露的。
+    """
+    import torch
+
+    from sglang.kernels.ops.layernorm.mhc import mhc_post_tilelang
+
+    M, HC, H = residual.shape
+    out = torch.empty_like(residual)
+    mhc_post_tilelang(comb.view(-1, HC, HC), residual, post.squeeze(-1),
+                      x, out, HC, H)
+    return out
+
+
 def sglang_sparse_mla_glm53(q, kv, indices, sm_scale: float = 1.0 / 768**0.5,
                             d_v: int = 256):
     """GLM-5.3-Flash 形状的稀疏 MLA 基线（sglang 自带的 DSA Triton kernel）。

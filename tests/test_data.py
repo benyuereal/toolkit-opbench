@@ -438,3 +438,49 @@ class TestIndexInputs(unittest.TestCase):
         import torch
         d = self._defn(low=0, high="SKV", invalid_ratio=0.3)
         self.assertTrue(torch.equal(self._build(d), self._build(d)))
+
+
+class TestPositiveInputs(unittest.TestCase):
+    """浮点输入可以声明 `positive: true`，只取 |randn|。
+
+    ## 为什么需要
+
+    `mhc-post-l1` 的 `comb` 是 Sinkhorn 的输出（非负、行和≈1），`post` 过
+    sigmoid（∈[0,2]）。用 randn 造会出负值，而负的混合权重让 4 项相加时
+    互相抵消到 1e-8 —— 正确性判据就退化成"谁的舍入误差更小"，和实现质量
+    无关。这不是放宽要求，是**别造物理上不存在的输入**。
+    """
+
+    def _defn(self, **in_spec):
+        from bench.data import definition as defn_mod
+
+        return defn_mod.Definition(
+            id="t", kind="kernel", family="g", tier="L1",
+            axes={"M": {"type": "const", "value": 256},
+                  "H": {"type": "const", "value": 128}},
+            inputs={"c": {"shape": ["M", "H"], "dtype": "float32"}},
+            outputs={}, tolerance={"rtol": 1e-2, "atol": 1e-2},
+            reference="reference.py",
+        )
+
+    def _build(self, decl):
+        from bench.data import workload as wl_mod
+
+        w = wl_mod.Workload("u1", {}, {"c": decl}, "public")
+        return wl_mod.build_inputs(w, self._defn())["c"]
+
+    def test_positive_has_no_negatives(self):
+        c = self._build({"type": "random", "positive": True})
+        self.assertEqual(int((c < 0).sum()), 0)
+        self.assertGreater(float(c.max()), 0.1, "全零说明 abs 写错了位置")
+
+    def test_default_still_has_negatives(self):
+        """不给 positive 时必须保持 randn 语义，别把别的题改了。"""
+        c = self._build({"type": "random"})
+        self.assertGreater(int((c < 0).sum()), 0)
+
+    def test_positive_is_reproducible(self):
+        import torch
+        a = self._build({"type": "random", "positive": True})
+        b = self._build({"type": "random", "positive": True})
+        self.assertTrue(torch.equal(a, b))
