@@ -1,0 +1,4 @@
+{"axes": {"M": 2048}, "inputs": {"x": {"type": "random"}}, "uuid": "pub-2048", "split": "public"}
+{"axes": {"M": 8192}, "inputs": {"x": {"type": "random"}}, "uuid": "pub-8192", "split": "public"}
+{"axes": {"M": 13312}, "inputs": {"x": {"type": "random"}}, "uuid": "hold-13312", "split": "holdout"}
+{"axes": {"M": 12040}, "inputs": {"x": {"type": "random"}}, "uuid": "hold-12040", "split": "holdout"}

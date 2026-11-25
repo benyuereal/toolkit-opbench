@@ -1,0 +1,70 @@
+{
+  "id": "quant-per-token-fp8-l1",
+  "kind": "kernel",
+  "family": "quant",
+  "tier": "L1",
+  "precision": [
+    "bfloat16",
+    "float8_e4m3fn"
+  ],
+  "axes": {
+    "M": {
+      "type": "var",
+      "domain": {
+        "values": [
+          2048,
+          8192,
+          12040,
+          13312
+        ]
+      }
+    },
+    "H": {
+      "type": "const",
+      "value": 4096
+    },
+    "NSCALE": {
+      "type": "const",
+      "value": 1
+    }
+  },
+  "inputs": {
+    "x": {
+      "shape": [
+        "M",
+        "H"
+      ],
+      "dtype": "bfloat16"
+    }
+  },
+  "outputs": {
+    "q": {
+      "shape": [
+        "M",
+        "H"
+      ],
+      "dtype": "float8_e4m3fn"
+    },
+    "scale": {
+      "shape": [
+        "M",
+        "NSCALE"
+      ],
+      "dtype": "float32"
+    }
+  },
+  "tolerance": {
+    "rtol": 0.01,
+    "atol": 0.01
+  },
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:copy",
+    "roofline_bandwidth": "peak_achievable:copy",
+    "work": "M*H*2 + M*H + M*4",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true,
+    "baseline_impl": "harness.implementations.lightop_per_token_quant_fp8"
+  }
+}

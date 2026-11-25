@@ -1,0 +1,57 @@
+{
+  "task": "quant-per-token-fp8-l1",
+  "t_b_ms": 0.07047686720101047,
+  "t_sol_ms": 0.05663352463508334,
+  "sclk_seen_mhz": [
+    1350
+  ],
+  "sclk_note": "本基线在卡 4（sclk 1350 MHz，机器全卡空闲窗口）上测。**共享机器警告**：同一份代码在不同时刻 M=2048 档实测 57–71 µs 漂移（cv 最高 0.28），只要有任何 job 把八张卡拉满就会出现。连续多次 t_b = 69.5 / 69.6 / 70.5 / 72.2 / 73.8 / 74.2 / 76.7 µs，本文件是其中一次实测值。复跑前先确认 `hy-smi -u` 全 0 且无 harness.verify 在跑。**不要用 sclk 做频率折算**。",
+  "baseline_impl": "harness.implementations.lightop_per_token_quant_fp8",
+  "peak_id": "peak_achievable:copy",
+  "peak_value": 1350.0,
+  "peak_kind": "peak_achievable",
+  "peak_status": "measured",
+  "work": "M*H*2 + M*H + M*4",
+  "work_unit": "byte",
+  "warmup": 50,
+  "iters": 200,
+  "flush_bytes": 16777216,
+  "sclk_mhz": 1350,
+  "shapes": [
+    {
+      "uuid": "pub-2048",
+      "axes": {
+        "H": 4096,
+        "NSCALE": 1,
+        "M": 2048
+      },
+      "median_ms": 0.06183999963104725,
+      "mad_ms": 0.004559999331831932,
+      "cv": 0.0737386701008735,
+      "sclk_mhz": 1350,
+      "clock_stable": true
+    },
+    {
+      "uuid": "pub-8192",
+      "axes": {
+        "H": 4096,
+        "NSCALE": 1,
+        "M": 8192
+      },
+      "median_ms": 0.08032000064849854,
+      "mad_ms": 0.0007999986410140991,
+      "cv": 0.00996014236248707,
+      "sclk_mhz": 1350,
+      "clock_stable": true
+    }
+  ],
+  "libs": {
+    "lightop": "0.6.0+dtk2604.torch2110.2609091740.g3a803e",
+    "aiter": "0.1.6+dtk2604.torch2110.2609092115.gad612d",
+    "deepgemm": "2.1.0+dtk2604.torch2110.2609092129.g8aaa0f",
+    "torch": "2.11.0+das.opt1.dtk2604.2609011004.gf088f2",
+    "triton": "3.6.0+dtk2604.torch2110.2609091754.g52ce09",
+    "DTK": "DTK-26.04-rc4",
+    "DTK_path": "/opt/dtk"
+  }
+}

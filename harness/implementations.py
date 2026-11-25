@@ -88,3 +88,75 @@ def lightop_add_rmsnorm_swiglu(x, residual, weight, eps: float = 1e-6):
     out = torch.empty(x.shape[0], x.shape[1] // 2, dtype=x.dtype, device=x.device)
     lightop.fuse_silu_and_mul(x, out)
     return out
+
+
+def lightop_moe_align(topk_ids, block_size: int = 128, num_experts: int = 64):
+    """lightop 的 moe_align_block_size（本机唯一现成路径）。
+
+    签名与直觉相反：`(topk_ids, block_size, num_experts)`——**block_size 在前**。
+    实测按 `(topk_ids, num_experts, block_size)` 传会抛
+    `RuntimeError: Boolean value of Tensor with more than one value is ambiguous`，
+    那个报错和参数顺序毫无关系，很容易被误导去查 dtype。
+
+    返回 (sorted_ids, expert_ids, num_tokens_post_pad)，缓冲区由库内部分配。
+    """
+    import lightop
+
+    return lightop.moe_align_block_size(topk_ids, block_size, num_experts)
+
+
+def lightop_per_token_quant_fp8(x):
+    """lightop 的 per-token FP8 动态量化（纯 kernel，无 weight）。
+
+    `lightop.per_token_quant_fp8` 只在子模块 `lightop.quant` 下，**不在顶层**
+    （`hasattr(lightop, "per_token_quant_fp8")` 是 False，2026-11-25 实测）。
+    顶层有 `rms_norm_per_token_fp8_quant`，但那个要 weight 参数、做的是
+    rmsnorm+quant 两步，不是纯量化。
+
+    签名 `(x, dtype=float8_e4m3fn, out_q=None, out_scale=None)`。
+    不传 out_* 时库内部 `torch.empty_like` 分配——这就是生产写法（调用方
+    通常也没法预分配，因为 M 来自 batch）。计时口径按这个形态。
+
+    返回 (q[M,H] fp8_e4m3, scale[M,1] fp32)。
+    """
+    from lightop import quant as lq
+
+    return lq.per_token_quant_fp8(x)
+
+
+def aiter_per_token_quant_hip(x):
+    """aiter 的 per-token 量化 HIP kernel，作为对照实现。
+
+    `aiter.per_token_quant_hip(x, scale=None, quant_dtype=..., num_rows=None, ...)`。
+    scale 传 None 时内部 `torch.empty((*shape[:-1], 1), fp32)`。
+    它会调 `dynamic_per_token_scaled_quant`，是同一套 C++ 入口。
+
+    **已知环境缺陷（不要当基线）**：本机偶发
+    `NotImplementedError: "min_all_cuda" not implemented for 'Float8_e4m3fn'`
+    （aiter 0.1.6）。实测 200 次连调 0 失败，但换 seed / 换张量后会零星触发，
+    触发一次就中断整轮计时。所以基线用 lightop。
+    """
+    import torch
+
+    import aiter
+
+    return aiter.per_token_quant_hip(x, quant_dtype=torch.float8_e4m3fn)
+
+
+def aiter_moe_sum(expert_out):
+    """aiter 的 moe_sum：把 K 份专家输出求和回 token。
+
+    schema: `aiter.moe_sum(input[M, K, H], output[M, H]) -> ()`
+    **原地写 output**，两参数、无返回值。
+
+    实测踩过：按 `(input, output, topk_indices)` 三参数调会抛
+    `expected at most 2 argument(s) but received 3`——签名是 2 个，
+    不像 topk_softmax 那样要三个缓冲区。
+    """
+    import aiter
+    import torch
+
+    M, K, H = expert_out.shape
+    out = torch.empty(M, H, dtype=expert_out.dtype, device=expert_out.device)
+    aiter.moe_sum(expert_out, out)
+    return out

@@ -1,3 +1,4 @@
+{"axes": {"S": 128}, "inputs": {"x": {"type": "random"}, "weight": {"type": "random"}}, "uuid": "pub-decode-128", "split": "public"}
 {"axes": {"S": 1024}, "inputs": {"x": {"type": "random"}, "weight": {"type": "random"}}, "uuid": "pub-1024", "split": "public"}
 {"axes": {"S": 293}, "inputs": {"x": {"type": "random"}, "weight": {"type": "random"}}, "uuid": "pub-293", "split": "public"}
 {"axes": {"S": 131}, "inputs": {"x": {"type": "random"}, "weight": {"type": "random"}}, "uuid": "hold-131", "split": "holdout"}

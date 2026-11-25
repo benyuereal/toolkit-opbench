@@ -1,0 +1,3 @@
+{"axes": {"M": 4096, "CAP": 40960, "BLOCKS": 320}, "inputs": {"topk_ids": {"type": "random", "low": 0, "high": 64}}, "uuid": "pub-4096", "split": "public"}
+{"axes": {"M": 8192, "CAP": 73728, "BLOCKS": 576}, "inputs": {"topk_ids": {"type": "random", "low": 0, "high": 64}}, "uuid": "pub-8192", "split": "public"}
+{"axes": {"M": 13312, "CAP": 114688, "BLOCKS": 896}, "inputs": {"topk_ids": {"type": "random", "low": 0, "high": 64}}, "uuid": "hold-13312", "split": "holdout"}

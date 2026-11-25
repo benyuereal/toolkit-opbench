@@ -1,0 +1,98 @@
+{
+  "id": "moe-align-permute-l1",
+  "kind": "kernel",
+  "family": "moe",
+  "tier": "L1",
+  "precision": [
+    "int32"
+  ],
+  "axes": {
+    "M": {
+      "type": "var",
+      "domain": {
+        "values": [
+          4096,
+          8192,
+          13312
+        ]
+      }
+    },
+    "CAP": {
+      "type": "var",
+      "domain": {
+        "values": [
+          40960,
+          73728,
+          114688
+        ]
+      }
+    },
+    "BLOCKS": {
+      "type": "var",
+      "domain": {
+        "values": [
+          320,
+          576,
+          896
+        ]
+      }
+    },
+    "E": {
+      "type": "const",
+      "value": 64
+    },
+    "K": {
+      "type": "const",
+      "value": 8
+    },
+    "ALIGN": {
+      "type": "const",
+      "value": 128
+    }
+  },
+  "inputs": {
+    "topk_ids": {
+      "shape": [
+        "M",
+        "K"
+      ],
+      "dtype": "int32",
+      "low": 0,
+      "high": "E"
+    }
+  },
+  "outputs": {
+    "sorted_ids": {
+      "shape": [
+        "CAP"
+      ],
+      "dtype": "int32"
+    },
+    "expert_ids": {
+      "shape": [
+        "BLOCKS"
+      ],
+      "dtype": "int32"
+    },
+    "num_post_pad": {
+      "shape": [
+        "M"
+      ],
+      "dtype": "int32"
+    }
+  },
+  "tolerance": {
+    "rtol": 0.0,
+    "atol": 0.0
+  },
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:copy",
+    "roofline_bandwidth": "peak_achievable:copy",
+    "work": "M*K*4 + CAP*4 + BLOCKS*4 + 4",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true,
+    "baseline_impl": "harness.implementations.lightop_moe_align"
+  }
+}
