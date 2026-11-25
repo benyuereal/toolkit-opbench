@@ -49,7 +49,7 @@ class Report:
 
 def check_env(env_file: str) -> tuple[list[str], list[str]]:
     """env 文件、凭据、URL 尾斜杠。返回 (problems, info)。"""
-    from harness.run import _load_env
+    from harness.run import _load_env, set_env_file
 
     problems, info = [], []
     if not os.path.isfile(env_file):
@@ -58,7 +58,9 @@ def check_env(env_file: str) -> tuple[list[str], list[str]]:
             "    修法：--env <有额度的文件>，或 export OPBENCH_ENV=..."
         )
         return problems, info
-    os.environ["OPBENCH_ENV"] = env_file
+    # 必须走 set_env_file()：`ENV_FILE` 是 import 时的快照，只改 os.environ
+    # 不会生效，_load_env() 仍读旧文件——那样这里的检查就查错了对象。
+    set_env_file(env_file)
     env = _load_env()
     if not (env.get("ANTHROPIC_AUTH_TOKEN") or env.get("ANTHROPIC_API_KEY")):
         problems.append(

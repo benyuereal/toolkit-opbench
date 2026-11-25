@@ -58,6 +58,20 @@ ALLOWED_TOOLS = ("Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite")
 # 把 3600s 的时间预算架空。要设就显式传 --max-usd。
 DEFAULT_MAX_USD = None
 
+# 续跑：`claude -p` 说完一句不带工具调用的话就退出（stop_reason=end_turn）。
+# 实测 D 臂 281s、C 臂 462s 就这样收场，而预算各有 3600s。续跑把
+# "我接下来要做 X" 变成"真的做了 X"。
+MAX_RESUMES = 12          # 最多续跑多少轮（每轮一次 API 调用会话）
+MAX_IDLE_RESUMES = 3      # 连续几轮没有任何新文件就判 stalled，不再烧钱
+
+CONTINUE_PROMPT = (
+    "继续。你上一条消息说到了下一步但还没执行——现在把它做完。\n"
+    "硬要求：必须在当前目录落下可评分的交付物。\n"
+    "  - `results/bench_std.json`（按题面口径的实测数字），或至少\n"
+    "  - `report.md`（结论 + 依据 + 复跑命令）\n"
+    "不要只描述打算怎么做；直接执行。如果已经做完，补齐缺失的那个文件再结束。"
+)
+
 # 产物里允许/应该出现的顶层条目。其余一律视为 agent 自造，
 # 记录但不影响判分（判分只认 report.md/scripts/results/solution.json）。
 ARTIFACT_NAMES = ("report.md", "scripts", "results", "solution.json")
@@ -273,7 +287,8 @@ def select_attempt(base: str) -> str | None:
 
 
 def build_cmd(task_dir: str, budget_s: int, max_usd: float | None = DEFAULT_MAX_USD,
-              plugin_dir: str | None = None) -> list[str]:
+              plugin_dir: str | None = None, resume: str | None = None,
+              resume_prompt: str | None = None) -> list[str]:
     """组命令。prompt 由 stdin 给，所以这里不含题面。
 
     模型与 effort 从 OPBENCH_* 环境变量取（见模块顶部），三臂一致。
@@ -281,6 +296,10 @@ def build_cmd(task_dir: str, budget_s: int, max_usd: float | None = DEFAULT_MAX_
     `plugin_dir`：该臂 cwd 里的 plugin 根。**每个臂指向自己的副本**，
     这样 skill 通过 Claude Code 的原生机制进入上下文，不靠 prompt 提示，
     也不会串到别的臂。
+
+    `resume`：接续同一个会话（`--resume <session-id>`）。`claude -p` 是单轮
+    语义，模型说完一句不带工具调用的话就退出；要它接着做，只能 resume。
+    此时 prompt 由 stdin 给 `resume_prompt`（一句"继续"），不重发整份题面。
     """
     cmd = [
         CLAUDE,
@@ -305,7 +324,23 @@ def build_cmd(task_dir: str, budget_s: int, max_usd: float | None = DEFAULT_MAX_
         cmd += ["--model", model]
     if plugin_dir:
         cmd += ["--plugin-dir", plugin_dir]
+    if resume:
+        cmd += ["--resume", resume]
     return cmd
+
+
+def set_env_file(path: str) -> None:
+    """切换本进程使用的 env 文件。
+
+    **为什么需要这个函数**：`ENV_FILE` 是 import 时从 `os.environ` 打的快照，
+    之后再写 `os.environ["OPBENCH_ENV"] = ...` **不会**影响已绑定的模块全局。
+    实测踩过：`preflight.check_env(tmpfile)` 就是这么写的，结果它对着临时文件
+    报告「检查通过」，而 `_load_env()` 读的其实是 `/workspace/tosc.env`
+    （这台机器上根本不存在）——两边看的不是同一个文件，尾斜杠检查形同虚设。
+    """
+    global ENV_FILE
+    ENV_FILE = path
+    os.environ["OPBENCH_ENV"] = path
 
 
 def _load_env() -> dict:
@@ -648,11 +683,121 @@ def _sha(text: str) -> str:
 def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
              max_usd: float, record: dict,
              plugin_dir: str | None = None) -> tuple[str, int | None, float]:
-    """跑一次 claude。返回 (status, exit_code, wall_time_s)。
+    """跑 claude，**没做完就续跑**，直到有交付物或预算耗尽。
+
+    返回 (status, exit_code, wall_time_s)。
+
+    ## 为什么要续跑（2026-11-25 实测）
+
+    `claude -p` 是**单轮**语义：模型输出一段不带 tool_use 的话，turn 就结束，
+    进程以 `stop_reason=end_turn` / `terminal_reason=completed` 正常退出。
+    实测两条臂都是这样收场的：
+
+        D: "No library op fuses all three. Let me build the harness: ..."  → 退出
+        C: "Loop ran and recorded. Now writing the harness-spec script."    → 退出
+
+    两句都是**「我接下来要做 X」**，而进程在 X 之前就没了。C 只用了 462s/3600s，
+    D 用了 281s/3600s。上一轮 A 臂能跑满 1783s 纯属它自己恰好没停——运气，不是机制。
+
+    `run.py` 只按 returncode 判 ok，于是"说了要做"被记成"做完了"，
+    空样本进了三臂对照。这条比任何口径错误都危险：它让**没干活看起来像干完了**。
+
+    ## 续跑怎么判定
+
+    用 `--resume <session-id>` 接着同一个会话（上下文不丢），补一句
+    「继续，直到交付物齐全」。终止条件按优先级：
+
+      * 有 `results/*.json` 或 `report.md` → 完成
+      * 累计 wall time 超预算 → 停下，如实标 timeout
+      * 连续 `MAX_IDLE_RESUMES` 次续跑后仍无交付物 → 判 `stalled`，不再烧钱
+      * 模型连工具都不调且无新交付物 → 同上
+
+    「无新交付物」而不是「无 tool_use」：模型可能先写一大段分析再动手，
+    只看 tool_use 会误判。以磁盘事实为准。
+    """
+    started = time.monotonic()
+    total_wall = 0.0
+    last_status = "error"
+    last_rc: int | None = None
+    session_id: str | None = None
+    idle_resumes = 0
+    prev_sig = _deliverable_sig(cwd)
+
+    for round_no in range(MAX_RESUMES + 1):
+        remain = budget_s - total_wall
+        if remain <= 1:
+            return "timeout", last_rc, round(total_wall, 1)
+
+        # 第二轮起用 --resume 接上同一会话；首轮用原 prompt。
+        # stdin 的内容跟着换：续跑只发一句"继续"，不重发整份题面
+        # （重发会让模型以为在开新任务，把已做的工作再做一遍）。
+        if session_id:
+            cmd = build_cmd(cwd, int(remain), max_usd, plugin_dir=plugin_dir,
+                            resume=session_id)
+            this_prompt = CONTINUE_PROMPT
+        else:
+            cmd = build_cmd(cwd, int(remain), max_usd, plugin_dir=plugin_dir)
+            this_prompt = prompt
+
+        status, rc, wall, session_id = _execute_once(
+            cwd, this_prompt, arm, int(remain), max_usd, record, cmd)
+        total_wall += wall
+        last_status, last_rc = status, rc
+        record["resume_rounds"] = round_no + 1
+
+        # 硬失败不续跑：超时/错误/预算问题续跑也没用
+        if status in ("timeout", "error", "budget", "gpu_locked", "gpu_busy"):
+            return status, rc, round(total_wall, 1)
+
+        # 有交付物 → 真做完了
+        if _has_deliverable(cwd):
+            return status, rc, round(total_wall, 1)
+
+        # 没有交付物：看这一轮有没有产出任何新东西
+        sig = _deliverable_sig(cwd)
+        if sig == prev_sig:
+            idle_resumes += 1
+            if idle_resumes >= MAX_IDLE_RESUMES:
+                # 连着几轮续跑都没落地任何文件：它卡在"想"上，不再烧预算
+                record["note"] = (
+                    f"续跑 {idle_resumes} 次后仍无交付物（results/*.json 或 report.md）；"
+                    f"最后状态 {status}"
+                )
+                return "stalled", rc, round(total_wall, 1)
+        else:
+            idle_resumes = 0
+            prev_sig = sig
+
+        if not session_id:
+            # 拿不到 session id 就无法续跑，只能如实报"没交付"
+            return "invalid:no_deliverable", rc, round(total_wall, 1)
+
+    record["note"] = f"续跑达上限 {MAX_RESUMES} 轮仍无交付物"
+    return "stalled", last_rc, round(total_wall, 1)
+
+
+def _deliverable_sig(cwd: str) -> tuple:
+    """交付物指纹：文件集合 + 大小 + mtime。用来判断"这一轮有没有新东西"。"""
+    import glob
+
+    sig = []
+    for pat in ("results/*.json", "report.md", "scripts/*", "*.md"):
+        for p in sorted(glob.glob(os.path.join(cwd, pat))):
+            try:
+                st = os.stat(p)
+                sig.append((os.path.basename(p), st.st_size, int(st.st_mtime)))
+            except OSError:
+                pass
+    return tuple(sig)
+
+
+def _execute_once(cwd: str, prompt: str, arm: str, budget_s: int,
+                  max_usd: float, record: dict,
+                  cmd: list[str]) -> tuple[str, int | None, float, str | None]:
+    """跑一次 claude。返回 (status, exit_code, wall_time_s, session_id)。
 
     status ∈ ok / timeout / budget / error
     """
-    cmd = build_cmd(cwd, budget_s, max_usd, plugin_dir=plugin_dir)
     env = os.environ.copy()
     env.update(_load_env())
     # 绑卡并行：把卡号写进子进程环境。DCU 上 torch 认 HIP_VISIBLE_DEVICES，
@@ -731,20 +876,41 @@ def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
         record["result_head"] = (parsed.get("result") or "")[:400]
         record["model_usage"] = parsed.get("modelUsage")
 
+    sess = (parsed or {}).get("session_id")
     if timed_out:
-        return "timeout", proc.returncode, wall
+        return "timeout", proc.returncode, wall, sess
     if proc.returncode != 0:
-        return "error", proc.returncode, wall
+        return "error", proc.returncode, wall, sess
     if parsed is None:
-        return "error", proc.returncode, wall
+        return "error", proc.returncode, wall, sess
 
-    # 2026-11-25 实测：C 臂三题调用 loop.py 的次数都是 0 —— 它退化成了"挂了 skill 的裸 CC"，
-    # 实验最核心的假设（强制迭代）根本没被验证。所以这里硬卡：没有流水就不算数。
+    record["stop_reason"] = parsed.get("stop_reason")
+    record["terminal_reason"] = parsed.get("terminal_reason")
+
+    # 这一层只判"这一轮跑成功没有"。"有没有交付物"交给外层 _execute 判定——
+    # 因为没交付物时不该直接判失败，而应该**续跑**（模型常说"接下来我要做 X"
+    # 然后就退出了 turn）。见 _execute 的 docstring。
     ev = _loop_evidence(cwd)
     record["loop_evidence"] = ev
     if _requires_loop(arm) and not ev:
-        return "invalid:no_loop_evidence", proc.returncode, wall
-    return "ok", proc.returncode, wall
+        return "invalid:no_loop_evidence", proc.returncode, wall, sess
+    if not _has_deliverable(cwd):
+        return "incomplete", proc.returncode, wall, sess
+    return "ok", proc.returncode, wall, sess
+
+
+def _has_deliverable(cwd: str) -> bool:
+    """有没有可评分的交付物：results/*.json 或 report.md。
+
+    为什么两道都要查：题面同时要求 `results/bench_std.json`（数字载体）
+    与 `report.md`（结论载体）。只要有一个就说明它确实干了活；
+    两个都没有 = 只输出了一段话，不能算完成。
+    """
+    import glob
+
+    if glob.glob(os.path.join(cwd, "results", "*.json")):
+        return True
+    return os.path.isfile(os.path.join(cwd, "report.md"))
 
 
 

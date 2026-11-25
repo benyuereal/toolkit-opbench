@@ -1,0 +1,34 @@
+{
+  "task": "norm-fused-add-rmsnorm-l1",
+  "shapes": [
+    {
+      "uuid": "pub-4096",
+      "axes": {
+        "H": 4096,
+        "M": 4096
+      },
+      "median_ms": 0.23192,
+      "min_ms": 0.21856,
+      "iters": 50,
+      "warmup": 10,
+      "l2_flush_bytes": 33554432
+    },
+    {
+      "uuid": "pub-8192",
+      "axes": {
+        "H": 4096,
+        "M": 8192
+      },
+      "median_ms": 0.442879,
+      "min_ms": 0.419679,
+      "iters": 50,
+      "warmup": 10,
+      "l2_flush_bytes": 33554432
+    }
+  ],
+  "denominator": {
+    "peak_id": "peak_achievable:copy",
+    "value_gbs": 1350.0
+  },
+  "impl": "aiter.fused_add_rms_norm_cu (aiter 0.1.6+dtk2604.torch2110.2609092115.gad612d)"
+}

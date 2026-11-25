@@ -141,13 +141,8 @@ def _axes_for(w, defn) -> dict:
     return axes
 
 
-def _t_sol_ms(defn, axes: dict, peak: float, unit: str) -> float:
-    """按 definition 声明的工作量与口径算 T_sol。
-
-    unit: "flop" → 2*M*N*K 这类；"byte" → 读+写字节数
-    表达式里的名字从 axes 取，`eval` 限制在无内置的命名空间里
-    （题面是仓库内文件，但仍不给 __builtins__）。
-    """
+def _bandwidth_floor_ms(defn, axes: dict, peak: float, unit: str) -> float:
+    """纯带宽地板：work / peak。**这不是 t_sol**，见 _t_sol_ms。"""
     expr = (defn.dcu or {}).get("work")
     if not expr:
         raise ValueError(
@@ -162,6 +157,39 @@ def _t_sol_ms(defn, axes: dict, peak: float, unit: str) -> float:
     else:
         raise ValueError(f"dcu.work_unit 必须是 flop 或 byte，实际 {unit!r}")
     return seconds * 1e3
+
+
+def _t_sol_ms(defn, axes: dict, peak: float, unit: str) -> float:
+    """T_sol = max(带宽地板, launch 地板)。
+
+    ## 为什么必须取 max（2026-11-25 实测教训）
+
+    小算子的 work 只有几百 KB，按带宽算出来的"理论下界"是亚微秒级——
+    moe-align 实测 0.0003 ms。而单次 kernel launch 的固定代价是 43 µs
+    （constants 的 launch.floor_us，空 kernel 实测中位）。
+
+    如果 t_sol 只按带宽算，会得出"上限 341×"，意思是"还有 341 倍的优化空间"。
+    那是个不存在的问题：**没有任何实现能在一个 launch 里做到比 launch 更快**。
+    拿这个数去驱动优化，会让人去改 kernel 内部——而真正的方向是减少 launch
+    次数或换算法结构。
+
+    所以 t_sol 与 `bench/score/perf.py:roofline_floor()` 用**同一个**口径。
+    以前两处不一致：score 取 max，baseline 只取带宽，于是基线文件里的
+    t_sol 和评分用的地板是两个数——读数的人会挑好看的那个。
+    """
+    bw_ms = _bandwidth_floor_ms(defn, axes, peak, unit)
+    launch_ms = _launch_floor_ms()
+    return max(bw_ms, launch_ms)
+
+
+def _launch_floor_ms() -> float:
+    """单次 kernel launch 的固定代价（ms）。从 constants 读，失败则 0。"""
+    from bench.hw import constants as C
+
+    try:
+        return float(C.get("launch.floor_us")["value"]) / 1e3
+    except (KeyError, TypeError, ValueError):
+        return 0.0
 
 
 def build(task_id: str, baselines_dir: str = BASELINES_DIR,

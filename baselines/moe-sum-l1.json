@@ -1,0 +1,57 @@
+{
+  "task": "moe-sum-l1",
+  "t_b_ms": 0.21565635174361625,
+  "t_sol_ms": 0.09807618045852583,
+  "sclk_seen_mhz": [
+    1350
+  ],
+  "sclk_note": "auto DPM 在 1200/1350 间跳变；实测 275–286 TF 与 constants 的 279 TF@1350 一致。**不要用 sclk 做频率折算**——单次读数会落到空闲档，折算出的达成率会虚高 10–100%。",
+  "baseline_impl": "harness.implementations.aiter_moe_sum",
+  "peak_id": "peak_achievable:copy",
+  "peak_value": 1350.0,
+  "peak_kind": "peak_achievable",
+  "peak_status": "measured",
+  "work": "M*K*H*2 + M*H*2",
+  "work_unit": "byte",
+  "warmup": 10,
+  "iters": 50,
+  "flush_bytes": 16777216,
+  "sclk_mhz": 1350,
+  "shapes": [
+    {
+      "uuid": "pub-decode-128",
+      "axes": {
+        "K": 8,
+        "H": 2048,
+        "M": 128
+      },
+      "median_ms": 0.07016000151634216,
+      "mad_ms": 0.014160001650452614,
+      "cv": 0.20182442053046942,
+      "sclk_mhz": 1350,
+      "clock_stable": true
+    },
+    {
+      "uuid": "pub-prefill-8192",
+      "axes": {
+        "K": 8,
+        "H": 2048,
+        "M": 8192
+      },
+      "median_ms": 0.662880003452301,
+      "mad_ms": 0.18608000874519348,
+      "cv": 0.28071446985288834,
+      "sclk_mhz": 1350,
+      "clock_stable": true
+    }
+  ],
+  "libs": {
+    "lightop": "0.6.0+dtk2604.torch2110.2609091740.g3a803e",
+    "aiter": "0.1.6+dtk2604.torch2110.2609092115.gad612d",
+    "deepgemm": "2.1.0+dtk2604.torch2110.2609092129.g8aaa0f",
+    "torch": "2.11.0+das.opt1.dtk2604.2609011004.gf088f2",
+    "triton": "3.6.0+dtk2604.torch2110.2609091754.g52ce09",
+    "DTK": "DTK-26.04-rc4",
+    "DTK_path": "/opt/dtk"
+  }
+}

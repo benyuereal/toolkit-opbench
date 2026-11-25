@@ -60,6 +60,30 @@ def _dirs(task: str, arm: str) -> list[str]:
     return sorted(out)
 
 
+def _pick_dir(dirs: list[str]) -> str | None:
+    """从若干 attempt 目录里挑**真正有交付物**的那个。
+
+    为什么不取编号最大的：`attempt-*` 这个名字不是 harness 独有的——
+    实测 D 臂发现自己的工作目录被外部删掉后，**自己 mkdir 了一个
+    attempt-2** 继续干活，结果只落在那里。它编号最大，但那不是
+    harness 开的一轮。同理，harness 开的 attempt-1 可能是个空壳
+    （模型说了句"我接下来要做 X"就退出，修复前会留空目录）。
+
+    所以按"有没有 results/*.json 或 report.md"挑，都有就取最新的。
+    都空的话返回最新的那个，让上层如实报"没有产物"。
+    """
+    if not dirs:
+        return None
+    with_deliverable = [
+        d for d in dirs
+        if glob.glob(os.path.join(d, "results", "*.json"))
+        or os.path.isfile(os.path.join(d, "report.md"))
+    ]
+    pool = with_deliverable or dirs
+    # 按 mtime 取最新，而不是按名字字典序：attempt-10 会排在 attempt-2 前面
+    return max(pool, key=lambda d: os.path.getmtime(d))
+
+
 def _read_bench_std(d: str) -> dict | None:
     p = os.path.join(d, "results", "bench_std.json")
     if not os.path.isfile(p):
@@ -75,7 +99,7 @@ def collect_one(task: str, arm: str) -> Artifacts:
     dirs = _dirs(task, arm)
     if not dirs:
         return Artifacts(task, arm, error="没有 attempt 目录")
-    d = dirs[-1]
+    d = _pick_dir(dirs)
     a = Artifacts(task=task, arm=arm, dir=d)
 
     for root, _dirnames, files in os.walk(d):

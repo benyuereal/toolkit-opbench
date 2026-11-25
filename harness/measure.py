@@ -55,6 +55,116 @@ def resolve(dotted: str):
     return getattr(m, attr)
 
 
+def resolve_spec(spec: str):
+    """支持两种写法：
+
+        module.func                      —— 已安装库里的实现
+        /abs/path/to/file.py:func        —— 任意 .py 文件（agent 自研 kernel）
+
+    为什么要有第二种：三臂把 kernel 写在各自的 cwd 里
+    （`/tmp/opbench-run/arm-X/<task>/attempt-N/scripts/xxx.py`），
+    那些文件不在 sys.path 上，`importlib.import_module` 拿不到。
+    没有这条路径，复测就只能靠手写临时脚本——实测已经发生过一次：
+    我用 /tmp/verify_ad.py 单独测 A 和 D，脚本没进仓库，下次还得重写。
+
+    加载时**按文件所在的目录加进 sys.path**：agent 的脚本常 `import common`
+    或读同目录的 .so，不加路径会 ImportError。
+    """
+    import importlib.util
+
+    if ":" not in spec:
+        return resolve(spec)
+
+    # 切点：`<path>.py[:<func>[:<arg>]]`。
+    # 三段形式用于「工厂函数」——例如算子卡的
+    # `_common.py:get_runner:fused-hip-v5`：get_runner 接受变体名、返回可调用对象。
+    # 不能简单 rpartition(':')，那样会把函数名当成参数。
+    head, *rest = spec.split(":")
+    if not os.path.isfile(head):
+        return resolve(spec)
+
+    path = os.path.abspath(head)
+    attr = rest[0] if rest else None
+    extra = rest[1:] if len(rest) > 1 else []
+
+    d = os.path.dirname(path)
+    if d not in sys.path:
+        sys.path.insert(0, d)
+    name = f"_opbm_{abs(hash(path)) & 0xFFFFFF:x}"
+    mod_spec = importlib.util.spec_from_file_location(name, path)
+    if mod_spec is None:
+        raise ImportError(f"加载不了 {path}")
+    m = importlib.util.module_from_spec(mod_spec)
+    sys.modules[name] = m
+    mod_spec.loader.exec_module(m)
+
+    if attr is None:
+        raise ValueError(f"{path} 需要一个函数名，写成 {path}:<func>")
+    if not hasattr(m, attr):
+        have = [n for n in dir(m) if not n.startswith("_")]
+        raise AttributeError(f"{path} 里没有 {attr}；可用的有 {have[:15]}")
+
+    obj = getattr(m, attr)
+    # 工厂形式：带参数调用，拿到真正的实现
+    if extra:
+        obj = obj(*extra)
+    return obj
+
+
+def time_interleaved(fns: dict, iters: int = 50, warmup: int = 20,
+                     flush_bytes: int | None = None) -> dict:
+    """**交替**计时：每轮把每个实现各测一次。
+
+    为什么必须交替（这是复测与自报数字对不上的主要原因）：
+    A/D/C 三臂是并行跑的，HBM 是三臂共享的。某个实现若恰好落在
+    邻居空闲的窗口里，会测出明显更好的数——实测 D 自报 0.11504 ms，
+    同一份 kernel 在干净卡上是 0.17440 ms，差 52%。
+
+    交替还解决温度/占用漂移：不能"先把 A 测完 50 次再测 B"，
+    那样 A 独占冷机、B 独占热机，差出来的是漂移不是实现差异。
+
+    返回 {name: {"median_ms", "min_ms", "mad_ms", "cv"}}。
+    """
+    import torch
+
+    from bench.timing import flush as flush_mod
+
+    if not fns:
+        raise ValueError("至少给一个实现")
+    nbytes = flush_mod.DEFAULT_FLUSH_BYTES if flush_bytes is None else int(flush_bytes)
+
+    # 每个实现单独付掉首次编译/JIT（实测 256³ mm 首调 5.6s）
+    for _ in range(max(1, warmup)):
+        for fn in fns.values():
+            fn()
+    torch.cuda.synchronize()
+
+    samples: dict[str, list[float]] = {k: [] for k in fns}
+    for _ in range(iters):
+        for name, fn in fns.items():
+            flush_mod.flush(nbytes)
+            s = torch.cuda.Event(enable_timing=True)
+            e = torch.cuda.Event(enable_timing=True)
+            s.record()
+            fn()
+            e.record()
+            e.synchronize()   # 交替必须逐个同步，否则 event 会攒在一起
+            samples[name].append(s.elapsed_time(e))
+
+    out = {}
+    for name, xs in samples.items():
+        med = statistics.median(xs)
+        mad = statistics.median([abs(v - med) for v in xs])
+        out[name] = {
+            "median_ms": med,
+            "min_ms": min(xs),
+            "mad_ms": mad,
+            "cv": (mad / med) if med else None,
+            "samples": len(xs),
+        }
+    return out
+
+
 def per_call_ms(fn, iters: int = 30, warmup: int = 6, flush_bytes: int | None = None):
     """逐次 event，返回 (median_ms, mad_ms, samples)。"""
     import torch
@@ -96,7 +206,7 @@ def measure(task_id: str, impl_path: str, shape_index: int = 0,
     pub, _ = wl_mod.split(ws)
     w = pub[shape_index]
 
-    impl = resolve(impl_path)
+    impl = resolve_spec(impl_path)
     tensors = wl_mod.build_inputs(w, defn)
     extra = list((defn.dcu or {}).get("extra_args") or [])
     inplace = list((defn.dcu or {}).get("inplace_inputs") or [])

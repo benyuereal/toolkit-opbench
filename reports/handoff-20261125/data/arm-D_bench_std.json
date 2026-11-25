@@ -1,0 +1,36 @@
+{
+  "task": "norm-fused-add-rmsnorm-l1",
+  "shapes": [
+    {
+      "uuid": "pub-4096",
+      "axes": {
+        "H": 4096,
+        "M": 4096
+      },
+      "median_ms": 0.12072,
+      "min_ms": 0.11616,
+      "iters": 40,
+      "warmup": 10,
+      "l2_flush_bytes": 33554432,
+      "impl": "aiter.rmsnorm2d_fwd_with_add"
+    },
+    {
+      "uuid": "pub-8192",
+      "axes": {
+        "H": 4096,
+        "M": 8192
+      },
+      "median_ms": 0.22776,
+      "min_ms": 0.18528,
+      "iters": 40,
+      "warmup": 10,
+      "l2_flush_bytes": 33554432,
+      "impl": "aiter.ops.triton.rmsnorm2d_fwd_with_add"
+    }
+  ],
+  "denominator": {
+    "peak_id": "peak_achievable:copy",
+    "value_gbs": 1350.0
+  },
+  "impl": "pub-4096:aiter.rmsnorm2d_fwd_with_add | pub-8192:aiter.ops.triton.rmsnorm2d_fwd_with_add"
+}

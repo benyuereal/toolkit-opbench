@@ -120,6 +120,44 @@ def build_pressure_inputs(tensors: dict, kind: str = "large") -> dict:
     return out
 
 
+_HOOK_CACHE: dict[str, object] = {}
+
+
+def _task_hook(defn):
+    """加载题目目录下的 check.py:compare_task（如果定义了）。
+
+    为什么需要：通用比法是逐位 + 浮点容差。有些算子的输出**顺序不唯一**
+    （moe-align 的 sorted_ids：同一专家内 token 先后由实现决定），
+    或有「只有前缀有效」的约定（尾部是缓冲区残留）。逐位比会把这些
+    正确实现判错，而放宽容差又会放过真错。所以让题目自己声明怎么比。
+
+    题目的 check.py 里没有 compare_task 就返回 None，走通用路径。
+    结果按 task id 缓存：一个 check_all 会对同一题跑十来个 workload
+    （public + holdout + 三档压力），不缓存就是反复 exec_module。
+    """
+    import importlib.util
+    import os
+
+    tid = getattr(defn, "id", None)
+    if not tid:
+        return None
+    if tid in _HOOK_CACHE:
+        return _HOOK_CACHE[tid]
+    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = os.path.join(here, "tasks", tid, "check.py")
+    hook = None
+    if os.path.isfile(path):
+        try:
+            spec = importlib.util.spec_from_file_location(f"_taskchk_{tid}", path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            hook = getattr(mod, "compare_task", None)
+        except Exception:
+            hook = None
+    _HOOK_CACHE[tid] = hook
+    return hook
+
+
 def check_all(defn, workloads, solution_fn, ref_module) -> Result:
     """public + holdout + 压力数值（极端 dtype 取值，如 fp16 上溢）。
 
@@ -157,6 +195,15 @@ def check_all(defn, workloads, solution_fn, ref_module) -> Result:
                     ok=False, failed_workloads=["output-count"],
                     note=f"输出个数不符：actual {len(actual)} vs expected {len(exps)}",
                 )
+            # 题目可以自己定义比对方式：有些算子的输出顺序不唯一
+            # （moe-align 的 sorted_ids 就是），或有"只有前缀有效"的约定。
+            # 逐位比会把正确实现判错。题级 hook 优先。
+            hook = _task_hook(defn)
+            if hook is not None:
+                ok, note = hook(actual, expected, tol, defn)
+                if not ok:
+                    return Result(ok=False, failed_workloads=["task-hook"], note=note)
+                return Result(ok=True)
             res = Result(ok=True)
             for idx, (a, e) in enumerate(zip(actual, exps)):
                 # 整数输出（top-k 索引、token id、flags）**必须精确相等**。

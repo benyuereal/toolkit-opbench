@@ -248,3 +248,69 @@ class TestReport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestResumeLogic(unittest.TestCase):
+    """claude -p 是单轮语义：说完不带 tool_use 的话就退出。
+
+    实测 D 臂 281s/3600s、C 臂 462s/3600s 就这样"成功"了，交付物为空。
+    这些测试锁住续跑机制，防止再退化成"说了就等于做了"。
+    """
+
+    def test_has_deliverable_requires_real_file(self):
+        from harness.run import _has_deliverable
+
+        with tempfile.TemporaryDirectory() as td:
+            self.assertFalse(_has_deliverable(td), "空目录不该算有交付物")
+            os.makedirs(os.path.join(td, "results"))
+            self.assertFalse(_has_deliverable(td), "空 results/ 不算")
+            with open(os.path.join(td, "results", "bench_std.json"), "w") as f:
+                f.write("{}")
+            self.assertTrue(_has_deliverable(td))
+
+    def test_report_md_alone_counts(self):
+        from harness.run import _has_deliverable
+
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "report.md"), "w") as f:
+                f.write("# 结论\n")
+            self.assertTrue(_has_deliverable(td))
+
+    def test_deliverable_sig_changes_on_write(self):
+        """续跑靠指纹判断"这轮有没有新东西"，指纹必须对写入敏感。"""
+        import time as _t
+
+        from harness.run import _deliverable_sig
+
+        with tempfile.TemporaryDirectory() as td:
+            s0 = _deliverable_sig(td)
+            _t.sleep(0.01)
+            with open(os.path.join(td, "notes.md"), "w") as f:
+                f.write("x")
+            s1 = _deliverable_sig(td)
+            self.assertNotEqual(s0, s1, "写了文件指纹没变，会误判成卡住")
+
+    def test_build_cmd_passes_resume(self):
+        from harness.run import build_cmd
+
+        cmd = build_cmd("/tmp/x", 100, None, resume="abc-123")
+        self.assertIn("--resume", cmd)
+        self.assertEqual(cmd[cmd.index("--resume") + 1], "abc-123")
+
+    def test_build_cmd_no_resume_by_default(self):
+        from harness.run import build_cmd
+
+        self.assertNotIn("--resume", build_cmd("/tmp/x", 100, None))
+
+    def test_continue_prompt_demands_artifacts(self):
+        """续跑提示必须点名交付物，否则模型会继续说下一句计划。"""
+        from harness.run import CONTINUE_PROMPT
+
+        self.assertIn("bench_std.json", CONTINUE_PROMPT)
+        self.assertIn("report.md", CONTINUE_PROMPT)
+
+    def test_resume_limits_sane(self):
+        from harness.run import MAX_IDLE_RESUMES, MAX_RESUMES
+
+        self.assertGreater(MAX_RESUMES, 0)
+        self.assertLess(MAX_IDLE_RESUMES, MAX_RESUMES)

@@ -1,0 +1,162 @@
+{
+ "task": "norm-fused-add-rmsnorm-l1",
+ "shapes": [
+  {
+   "uuid": "pub-4096",
+   "axes": {
+    "H": 4096,
+    "M": 4096
+   },
+   "median_ms": 0.088,
+   "min_ms": 0.08496,
+   "iters": 100,
+   "warmup": 20,
+   "l2_flush_bytes": 16777216,
+   "gbs_median": 1525.2,
+   "gbs_min": 1579.8,
+   "achieved_pct_median": 113.0,
+   "achieved_pct_min": 117.0,
+   "impl": "triton_fused_rpm1_w8",
+   "all_candidates": {
+    "triton_fused_rpm1_w4": {
+     "median_ms": 0.08968,
+     "min_ms": 0.08432,
+     "gbs_median": 1496.6,
+     "achieved_pct_median": 110.9
+    },
+    "triton_fused_rpm2_w4": {
+     "median_ms": 0.10856,
+     "min_ms": 0.08656,
+     "gbs_median": 1236.3,
+     "achieved_pct_median": 91.6
+    },
+    "triton_fused_rpm1_w8": {
+     "median_ms": 0.088,
+     "min_ms": 0.08496,
+     "gbs_median": 1525.2,
+     "achieved_pct_median": 113.0
+    },
+    "triton_fused_rpm2_w8": {
+     "median_ms": 0.09136,
+     "min_ms": 0.08544,
+     "gbs_median": 1469.1,
+     "achieved_pct_median": 108.8
+    },
+    "triton_fused_rpm4_w8": {
+     "median_ms": 0.0972,
+     "min_ms": 0.09008,
+     "gbs_median": 1380.8,
+     "achieved_pct_median": 102.3
+    },
+    "aiter.fused_add_rms_norm_cu": {
+     "median_ms": 0.24064,
+     "min_ms": 0.215199,
+     "gbs_median": 557.8,
+     "achieved_pct_median": 41.3
+    },
+    "torch_unfused_3pass": {
+     "median_ms": 0.87432,
+     "min_ms": 0.7368,
+     "gbs_median": 153.5,
+     "achieved_pct_median": 11.4
+    }
+   }
+  },
+  {
+   "uuid": "pub-8192",
+   "axes": {
+    "H": 4096,
+    "M": 8192
+   },
+   "median_ms": 0.17424,
+   "min_ms": 0.16272,
+   "iters": 100,
+   "warmup": 20,
+   "l2_flush_bytes": 16777216,
+   "gbs_median": 1540.6,
+   "gbs_min": 1649.7,
+   "achieved_pct_median": 114.1,
+   "achieved_pct_min": 122.2,
+   "impl": "triton_fused_rpm1_w8",
+   "all_candidates": {
+    "triton_fused_rpm1_w4": {
+     "median_ms": 0.172559,
+     "min_ms": 0.16144,
+     "gbs_median": 1555.6,
+     "achieved_pct_median": 115.2
+    },
+    "triton_fused_rpm2_w4": {
+     "median_ms": 0.17464,
+     "min_ms": 0.16416,
+     "gbs_median": 1537.1,
+     "achieved_pct_median": 113.9
+    },
+    "triton_fused_rpm1_w8": {
+     "median_ms": 0.17424,
+     "min_ms": 0.16272,
+     "gbs_median": 1540.6,
+     "achieved_pct_median": 114.1
+    },
+    "triton_fused_rpm2_w8": {
+     "median_ms": 0.17128,
+     "min_ms": 0.16352,
+     "gbs_median": 1567.2,
+     "achieved_pct_median": 116.1
+    },
+    "triton_fused_rpm4_w8": {
+     "median_ms": 0.17848,
+     "min_ms": 0.16704,
+     "gbs_median": 1504.0,
+     "achieved_pct_median": 111.4
+    },
+    "aiter.fused_add_rms_norm_cu": {
+     "median_ms": 0.475599,
+     "min_ms": 0.41952,
+     "gbs_median": 564.4,
+     "achieved_pct_median": 41.8
+    },
+    "torch_unfused_3pass": {
+     "median_ms": 1.907198,
+     "min_ms": 1.428959,
+     "gbs_median": 140.7,
+     "achieved_pct_median": 10.4
+    }
+   }
+  }
+ ],
+ "denominator": {
+  "peak_id": "peak_achievable:copy",
+  "value_gbs": 1350.0
+ },
+ "impl": "triton_fused_rpm1_w8",
+ "meta": {
+  "controls": {
+   "stream_2r2w_same_shape": {
+    "median_ms": 0.1716800034046173,
+    "min_ms": 0.16383999586105347,
+    "bytes": 268435456,
+    "gbs_median": 1563.5802113036332,
+    "gbs_min": 1638.4000413894664
+   },
+   "copy_1r1w_64MiB": {
+    "median_ms": 0.08383999764919281,
+    "min_ms": 0.08047900348901749,
+    "bytes": 134217728,
+    "gbs_median": 1600.8794342003685,
+    "gbs_min": 1667.7359582156846
+   },
+   "read_only_64MiB": {
+    "median_ms": 0.06816000118851662,
+    "min_ms": 0.05663999915122986,
+    "bytes": 67108864,
+    "gbs_median": 984.5783865876207,
+    "gbs_min": 1184.8316561731945
+   }
+  },
+  "torch": "2.11.0",
+  "hip": "6.3.26113",
+  "device": "BW1100",
+  "l2_bytes": 8388608,
+  "sclk_note": "1350 MHz (level 8) observed before/after; 测试期间逐 rep 前 warm_clocks 拉档"
+ }
+}

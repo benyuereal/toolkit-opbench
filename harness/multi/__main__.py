@@ -91,7 +91,10 @@ def main(argv=None) -> int:
         print(f"已收紧 {len(done)} 个旧产物树：{done}")
         return 0
 
-    os.environ["OPBENCH_ENV"] = a.env
+    # 同步改模块全局，否则本进程里的 _load_env() 会读旧的默认路径
+    # （子进程靠继承 os.environ 没问题，但 preflight 是在本进程里查的）。
+    from harness.run import set_env_file
+    set_env_file(os.path.abspath(a.env))
     arms = [x.strip().upper() for x in a.arms.split(",") if x.strip()]
 
     # 只报进度 / 只收集：优先用上次的状态文件

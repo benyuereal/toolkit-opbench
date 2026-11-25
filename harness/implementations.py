@@ -160,3 +160,57 @@ def aiter_moe_sum(expert_out):
     out = torch.empty(M, H, dtype=expert_out.dtype, device=expert_out.device)
     aiter.moe_sum(expert_out, out)
     return out
+
+
+def sglang_sparse_mla_glm53(q, kv, indices, sm_scale: float = 1.0 / 768**0.5,
+                            d_v: int = 256):
+    """GLM-5.3-Flash 形状的稀疏 MLA 基线（sglang 自带的 DSA Triton kernel）。
+
+    ## 为什么落在这里
+
+    `flash_mla`（1.2.0）**吃不下本题形状**，两条路都堵死（2026-11-25 实测）：
+
+      * `flash_mla_sparse_fwd(q[H,64,768], ...)` → `RuntimeError: Invalid d_qk: 768`
+        （prefill kernel 只接受 d_qk ∈ {512, 576}，且 `d_v` 只能是 512）
+      * `flash_mla_with_kvcache(..., indices=...)` → `RuntimeError: DSA BF16 sparse
+        decode only supports d_qk == 512 for now`
+
+    `aiter.ops.tilelang.sparse_mla_fwd` 能编译（dim=256/tail_dim=512），但它内部
+    带 causal 掩码：随机 top-k 下标（非因果）下 max_abs 0.2–0.57，是错的结果，
+    不能当基线。
+
+    可用且语义正确（随机下标下 max_abs ≈ 2e-3）的是 sglang 的
+    `sglang.kernels.ops.attention.dsa.triton_sparse_mla.triton_sparse_mla_fwd`。
+    这也是本机 GLM 服务真实走的 DSA 路径上游。
+
+    ## 签名与形状约定（原样转发，不做任何预处理）
+
+        triton_sparse_mla_fwd(q_nope, q_rope, kv, indices, sm_scale, d_v=256)
+          q_nope:  [S, H, d_v]       q 的前 d_v 维
+          q_rope:  [S, H, D-d_v]     q 的后 512 维（本题 D=768 → 768-256）
+          kv:      [SKV, 1, D]       bf16
+          indices: [S, 1, TOPK]     int32，-1 表示无效槽位
+          → 返回 [1, S, H, d_v] bf16
+
+    注意它把 q **拆成两段**吃：主段宽 d_v、尾段宽 D-d_v。这与题面「q 是
+    一整块 [S,64,768]」不同，适配层在这里做切片是**参数形状对齐**，
+    不是优化。
+
+    ## 计时口径
+
+    `q_nope.contiguous()` / `q_rope.contiguous()` 在计时窗口内执行。理由：
+    切片出来的 `q[..., :256]` 本身不连续，生产里也不会有预先把 q 拆成两块
+    的免费机会。把它放到窗口外，量到的就不是"跑这个算子"的代价。
+
+    num_heads=64 恰好是该 kernel `H` 维的一个 warp-tile，不需要 padding。
+    """
+    import torch
+
+    from sglang.kernels.ops.attention.dsa.triton_sparse_mla import (
+        triton_sparse_mla_fwd,
+    )
+
+    q_nope = q[..., :d_v].contiguous()
+    q_rope = q[..., d_v:].contiguous()
+    out = triton_sparse_mla_fwd(q_nope, q_rope, kv, indices, sm_scale, d_v)
+    return out[0]
