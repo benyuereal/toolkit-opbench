@@ -416,6 +416,56 @@ class TestClaudeMdNeutrality(unittest.TestCase):
         from harness.arms import c
         self.assertEqual(c.build_prompt("# 题面\n内容"), "# 题面\n内容")
 
+    def test_c_arm_does_not_hard_require_loop_evidence(self):
+        """C 臂的 CLAUDE.md 不能把 loop 流水写成"没有就 invalid"。
+
+        ## 为什么
+
+        能跑 `loop.py -C <卡>` 的目录只有 `skills/op-*/`（要有 bench/ab.py），
+        而 `op-atlas/cards/` 下那 50 多个 yaml 是**知识卡**、不是能跑的卡。
+        实测（2026-11-25）round3 三题里：
+            mla-sparse-glm53-l1  → op-sparse-mla/        ✅ 有
+            lin-causal-conv1d-l1 → 只有 causal-conv1d.yaml ❌ 无
+            mhc-post-l1          → 只有 mhc-fused.yaml     ❌ 无
+
+        硬判的结果是 C 臂在这两题上必然 `invalid:no_loop_evidence`，
+        测出来的是"它找不到卡"，不是"skills 有没有用"——而且会**系统性
+        低估 C 臂**。所以改成软约束：有卡就走，没卡正常交付。
+        """
+        from harness.arms import c
+
+        md = self._claude_md(c)
+        self.assertNotIn(
+            "invalid:no_loop_evidence", md,
+            "C 臂 CLAUDE.md 又把 loop 流水写成了硬门槛",
+        )
+        self.assertNotIn(
+            "没有这个产物，本次交付直接判", md,
+            "C 臂 CLAUDE.md 又出现了「没有就判死」的措辞",
+        )
+        # 正向：仍然鼓励走 loop，并说明没有卡时怎么办
+        self.assertIn("没有对应卡时", md)
+
+    def test_loop_evidence_is_not_a_verdict(self):
+        """`_loop_evidence` 只能记录，不能进判定。
+
+        原先 `_check_round` 里有 `if _requires_loop(arm) and not ev: return
+        "invalid:no_loop_evidence"`。理由同上一条：这会让没对应卡的题
+        一律判死。现在证据只写进 record 供报告统计。
+        """
+        import inspect
+
+        from harness import run
+
+        src = inspect.getsource(run)
+        self.assertNotIn("invalid:no_loop_evidence", src)
+        self.assertFalse(
+            hasattr(run, "_requires_loop"),
+            "_requires_loop 已无调用方，留着会被误用回判定路径",
+        )
+        # 记录还在：没交付物时必须先判 incomplete，而不是被 loop 证据拦住
+        self.assertTrue(hasattr(run, "_has_deliverable"))
+
 
 class TestArmBudgetComparability(unittest.TestCase):
     """三臂只许差上下文，不许差预算。"""

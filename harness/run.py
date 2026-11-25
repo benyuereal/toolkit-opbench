@@ -890,10 +890,14 @@ def _execute_once(cwd: str, prompt: str, arm: str, budget_s: int,
     # 这一层只判"这一轮跑成功没有"。"有没有交付物"交给外层 _execute 判定——
     # 因为没交付物时不该直接判失败，而应该**续跑**（模型常说"接下来我要做 X"
     # 然后就退出了 turn）。见 _execute 的 docstring。
-    ev = _loop_evidence(cwd)
-    record["loop_evidence"] = ev
-    if _requires_loop(arm) and not ev:
-        return "invalid:no_loop_evidence", proc.returncode, wall, sess
+    #
+    # loop 流水只**记录**不判定。原先是 C 臂的硬门槛（没有就 invalid），
+    # 但那只对 toolkit_skills 里恰好有对应算子卡的题成立：`op-sparse-mla/`
+    # 有 bench/ab.py，可 mhc-post 和 causal-conv1d 只有 op-atlas 下的
+    # yaml 卡（是知识卡，不是能跑的卡目录）。硬判会把这两题的 C 臂一律
+    # 判 invalid——测出来的是"它找不到卡"，不是"skills 有没有用"。
+    # 证据仍写进 record，报告里单独统计，让"哪道题它走了 loop"可见。
+    record["loop_evidence"] = _loop_evidence(cwd)
     if not _has_deliverable(cwd):
         return "incomplete", proc.returncode, wall, sess
     return "ok", proc.returncode, wall, sess
@@ -914,17 +918,12 @@ def _has_deliverable(cwd: str) -> bool:
 
 
 
-def _requires_loop(arm: str) -> bool:
-    """哪些臂必须留下 loop 迭代证据。
-
-    目前只有 C 臂（toolkit-skills）：它的 loop.py 会把流水写到 <卡片>/runs/loop/*.jsonl。
-    D 臂（SkillHub）的 loop 是 skill 形态、产物路径不统一，暂不做硬校验。
-    """
-    return arm.upper() == "C"
-
-
 def _loop_evidence(cwd: str) -> list[str]:
-    """在 cwd 下找 loop.py 的迭代流水。"""
+    """在 cwd 下找 loop.py 的迭代流水。
+
+    只做统计用（`record["loop_evidence"]`），**不再作为判定依据**。
+    报告里按臂汇总"这道题走没走 loop"，是 C 臂是否真用上知识库的一个旁证。
+    """
     import glob
     got = set(glob.glob(os.path.join(cwd, "**", "runs", "loop", "*.jsonl"), recursive=True))
     got.update(glob.glob(os.path.join(cwd, "runs", "loop", "*.jsonl")))
