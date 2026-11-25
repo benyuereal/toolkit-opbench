@@ -1,0 +1,24 @@
+# 第三轮：能拉开差距的三道题
+#
+# 前两轮的教训：`norm-act-swiglu-add-rmsnorm-l1` 三臂都做到地板的 90%+，
+# 最大差 12.3%，M=128 时 C 赢、M=8192 时 A 赢——**排名会随形状翻转**。
+# 那种题无法支撑"skills 有没有用"的结论，不是臂不行，是题没有分辨力。
+#
+# 这三道是按"基线离地板有多远"挑的（数字来自各自 baselines/*.json）：
+#
+#   lin-causal-conv1d-l1   上限 8.20x   基线只到地板 12.2%  ← 最大空间
+#   mla-sparse-glm53-l1    上限 6.50x   GLM-5.3-Flash 真实形状
+#   mhc-post-l1            上限 1.92x   纯流式，考点是分块（residual 读几遍）
+#
+# 第三道特意选了个上限小但**判据锋利**的：1.92x 的空间全在一个认知点上，
+# 做对了直接贴墙，做错了差 2.3 倍（9H vs 21H）。它和另外两道考的不是
+# 同一种能力，三道一起才能区分"会调库"和"看得懂访存"。
+#
+# budget 必须 >= 各题 task.md 写的时间预算，否则 run.py 会拒绝开跑。
+name: round3
+description: 三个有分辨力的算子：conv1d / sparse MLA / mHC post
+needs_gpu: true
+tasks:
+  - {id: mhc-post-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: lin-causal-conv1d-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: mla-sparse-glm53-l1, tier: L1, budget: 3600, needs_gpu: true}
