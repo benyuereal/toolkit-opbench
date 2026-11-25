@@ -39,6 +39,39 @@ make cycle TASKS='mla-sparse-l1 moe-gating-l1'
 它按顺序做：**建基线 → 跑三臂（A/B/C）→ verify → collect → 出报告**。
 每步失败即停。
 
+### 多臂测试（推荐入口）
+
+臂数不限于三个。`--arms A,C,D` 或 `--arms A,B,C,D,E`，任意组合。
+
+```bash
+# 0. 先预检（把卡占用、时钟档位、隔离、预算、口径全部查一遍）
+python3 -m harness.multi --suite three-way --check-only
+
+# 1. 全跑：预检 → 下发 → 进度 → 收集
+python3 -m harness.multi --suite three-way
+python3 -m harness.multi --tasks norm-fused-add-rmsnorm-l1 --arms A,C,D
+
+# 2. 四步可分开跑
+python3 -m harness.multi --progress          # 只看进度（含"卡住"判定）
+python3 -m harness.multi --collect           # 只收集产物
+python3 -m harness.multi --quarantine        # 收紧早期未隔离产物树的权限
+```
+
+模块拆分在 `harness/multi/`：
+
+| 模块 | 职责 |
+|---|---|
+| `model.py` | 口径（`Caliber`）+ 单元展开。**同一题只造一个口径实例**，物理上不可能各臂口径不一致 |
+| `isolation.py` | 一臂一用户，`su` 实测互不可见 |
+| `preflight.py` | 开跑前全部准入检查，每条对应一次历史事故 |
+| `dispatch.py` | 命令构造、预算一致性、串行/跨卡并行 |
+| `progress.py` | **以产物为准**的进度；meta.json 不算"有产物" |
+| `collect.py` | 产物归拢；泄漏痕迹检测 |
+| `report.py` | 性能/正确性/证据三维；允许并明确写出"没有提升" |
+
+**为什么以产物为准**：`claude -p` 的退出码不可靠，超时/被预算切断/子进程
+残留都可能是 0。磁盘上有什么才是事实。
+
 ### 分步跑（想控制每一步时）
 
 ```bash
@@ -48,23 +81,20 @@ python3 -m harness.baseline --task mla-sparse-l1
 # 2. 跑一个臂
 python3 -m harness.run --task mla-sparse-l1 --arm A --budget 1800
 
-# 3. 跑一个 suite 的三臂
-python3 -m harness.run --suite suites/smoke.yaml
-
-# 4. 校验产物
+# 3. 校验产物
 python3 -m bench.check.integrity --run runs/arm-A
 
-# 5. 汇总（必须给 --tasks，否则会把历史单元也算进来）
+# 4. 汇总（必须给 --tasks，否则会把历史单元也算进来）
 python3 -m harness.collect --tasks mla-sparse-l1 --print
 ```
 
-### 跨卡并行（不同题用不同卡，同题三臂同卡）
+### 跨卡并行（不同题用不同卡，同题各臂同卡）
 
 ```bash
-python3 -m harness.parallel_run --tasks mla-sparse-l1 moe-gating-l1
+python3 -m harness.multi --suite three-way --parallel-cards
 ```
 
-**设计取舍**：同一道题的三臂**必须同一张卡**（否则 Δ 里混进卡间差异），
+**设计取舍**：同一道题的各臂**必须同一张卡**（否则 Δ 里混进卡间差异），
 不同题可以并行。所以并行度 = min(题数, 空闲卡数)。
 
 ---
