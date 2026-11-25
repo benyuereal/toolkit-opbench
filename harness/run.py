@@ -243,6 +243,10 @@ def guard_answer_readable(task_id: str, arm: str) -> None:
     targets = [
         os.path.join(task_dir(task_id), "expect.md"),
         os.path.join(task_dir(task_id), "definition.json"),
+        # reference.py 是**正确答案本身**（逐行可执行的 torch 参考实现），
+        # 读到它比读到 expect.md 更省事：直接抄 linalg 语义，连猜都不用猜。
+        # 之前只挡了前两个，实测 opbench 用户对它是可读的（644）。
+        os.path.join(task_dir(task_id), "reference.py"),
     ]
     readable = []
     for p in targets:

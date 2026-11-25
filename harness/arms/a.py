@@ -8,11 +8,12 @@ cwd 里只有题目本身。任何"顺手给点提示"都会污染基线，一�
 测出来的是提示长度而不是知识。这一行不是提示，是**实验条件声明**。
 """
 ARM = "A"
-USER = "opbench"
+USER = "opb_a"
 
 
 def build_prompt(task_md: str) -> str:
-    return f"{task_md.rstrip()}\n\n---\n\n参考资料：无\n"
+    # 与 C/D 逐字相同：差异只能来自"有没有 skill 环境"，不能来自 prompt。
+    return task_md
 
 
 def extra_env() -> dict:

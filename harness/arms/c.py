@@ -24,6 +24,8 @@ import shutil
 import subprocess
 
 ARM = "C"
+# 与 A 臂同样换用户：root 跑的话 expect.md / baselines 全都读得到，等于给答案。
+USER = "opb_c"
 SKILL_ROOT = "/workspace/toolkit_skills"
 # 副本放在 cwd 下的这个名字。CLAUDE.md 与 prompt 都引用它。
 LINK_NAME = "skill"
@@ -36,42 +38,44 @@ PLUGIN_SUBDIR = os.path.join(LINK_NAME, "Plugins", "ops")
 #   只写"已安装 ops 插件，自己看"     → agent 跑 `claude plugin details`，
 #                                      但 --plugin-dir 装的 plugin 查不到 → 放弃
 #   列出 16 个 skill 名 + 不指定用途  → agent 自己选了 op-roofline，回答引用了 skill 内容 ✅
-CLAUDE_MD = """# 本机已安装的 ops skill 插件（16 个）
+CLAUDE_MD = """# 本机已安装的 ops skill 插件
 
-用 `Skill` 工具调用，参数格式 `ops:<名字>`。
-
-算子：{operator_skills}
-
-方法：{method_skills}
-
-按任务需要**自行判断**该加载哪个。
+用 `Skill` 工具加载，参数格式 `ops:<名字>`。**该加载哪个由你根据任务判断**，
+本说明不指定具体用哪个 skill、哪个算子卡、也不指定实现位置。
 
 ## 优化闭环
 
-如果被优化的算子有对应的卡（`{plugin}/skills/op-<算子名>/`），
-用它自带的循环引擎推进，不要只测一次就下结论：
+本仓库的算子卡自带一个优化循环驱动 `loop.py`，入口在：
 
-    python3 -I {plugin}/engine/loop.py -C {plugin}/skills/op-<算子名> status
-    python3 -I {plugin}/engine/loop.py -C {plugin}/skills/op-<算子名> queue
-    python3 -I {plugin}/engine/loop.py -C {plugin}/skills/op-<算子名> run <tag>
+    {plugin}/engine/loop.py
 
-`run` 会调卡自带的 bench/ab.py 做 A/B、按 done_when 外部裁决，
-不接受"我觉得快了"。
+它接受一张"卡"（目录）作为 `-C` 参数，提供 status / queue / run 等子命令：
+
+    python3 -I {plugin}/engine/loop.py -C <卡目录> status
+    python3 -I {plugin}/engine/loop.py -C <卡目录> queue
+    python3 -I {plugin}/engine/loop.py -C <卡目录> run <tag>
+
+用哪个卡、跑哪个 tag，由你按任务自己定位。
+
+## 完成标准（硬要求）
+
+**本次任务的完成标准不是「给出一个数」，而是「走完 loop.py 的迭代」。**
+
+至少要真正执行过：
+
+    python3 -I {plugin}/engine/loop.py -C <卡目录> run <tag>
+
+并且卡目录下必须留下 `runs/loop/*.jsonl` 流水。
+
+**没有这个产物，本次交付直接判 `invalid:no_loop_evidence`，不进对比。**
+单次手测得到的数字不作为结论提交——那测不出「迭代是否起作用」。
+
+`run` 会调卡自带的 bench/ab.py 做 A/B、按 done_when 外部裁决，不接受"我觉得快了"。
 
 ## 本机事实
 
 gfx938 DCU。时钟/占用查 `hy-smi`（**不是** rocprof / nvidia-smi / K100）。
 """
-
-OPERATOR_SKILLS = (
-    "op-fused-add-rmsnorm · op-rmsnorm-fused · op-moe-topk-gating · op-moe-w8a8\n"
-    "      op-moe-align-permute · op-gemm-fp8 · op-sparse-mla"
-)
-METHOD_SKILLS = (
-    "op-roofline（带宽/峰值分母）· op-bench（微基准）· op-contract · op-gate\n"
-    "      op-optimize · op-profiling · op-hip-compile · op-source-patch · op-stack-design"
-)
-
 
 def build_prompt(task_md: str) -> str:
     """prompt 与 A 臂**完全相同**（只有题面）。
@@ -110,12 +114,19 @@ def stage_files(cwd: str) -> list[str]:
         f.write('{\n  "enabledPlugins": {"ops@dcu-toolkit-marketplace": true}\n}\n')
     staged.append(os.path.relpath(settings, cwd))
 
-    # CLAUDE.md：列清单 + 用法，不指定用途
-    md = CLAUDE_MD.format(plugin=PLUGIN_SUBDIR, operator_skills=OPERATOR_SKILLS,
-                          method_skills=METHOD_SKILLS)
+    # CLAUDE.md：只说明用什么驱动（loop.py）+ 入口在哪怎么调。
+    # **不列具体算子卡、不指定哪个算子在哪、不写实现位置**——
+    # 该加载哪个 skill、用哪张卡、跑哪个 tag，由 agent 按任务自己判断。
+    # 写死等于把答案的一半喂给它，就测不出"会不会自己找"。
+    md = CLAUDE_MD.format(plugin=PLUGIN_SUBDIR)
     with open(os.path.join(cwd, "CLAUDE.md"), "w", encoding="utf-8") as f:
         f.write(md)
     staged.append("CLAUDE.md")
+
+    # 换到 opbench 用户跑之后，拷进去的副本属主还是 root，opbench 写不了
+    # <card>/runs/loop/*.jsonl，loop.py 会直接失败。这里放开写权限。
+    subprocess.run(["chown", "-R", "opb_c:opb_c", cwd], check=False)
+    subprocess.run(["chmod", "-R", "u+rwX,go-rwx", cwd], check=False)
     return staged
 
 

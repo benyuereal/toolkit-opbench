@@ -66,6 +66,12 @@ def _sclk() -> int | None:
         levels = dcu._sclk_levels()
         if not levels:
             return None
+        # 读**正在用的那张卡**，不取全卡最小值。
+        # 实测踩过：卡 4 在 1350、其余在 600，取 min 会把 1350 上的测量
+        # 记成 600，让人误判"这是降频档测的"。
+        dev = dcu.sclk_of_device()
+        if dev is not None:
+            return dev
         return min(m for _, m in levels)
     except Exception:
         return None

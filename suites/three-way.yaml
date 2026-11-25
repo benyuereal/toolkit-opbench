@@ -11,7 +11,9 @@
 name: three-way
 description: 裸 CC vs SkillHub vs toolkit-skills，三个场景
 needs_gpu: true
+# budget 必须 >= 各题 task.md 里写的时间预算，否则 run.py 会拒绝开跑。
+# 现状：moe-gating/mla-sparse 写 30 分钟（1800s），norm-fused 写 60 分钟（3600s）。
 tasks:
   - {id: moe-gating-l1, tier: L1, budget: 1800, needs_gpu: true}
-  - {id: norm-fused-add-rmsnorm-l1, tier: L1, budget: 1800, needs_gpu: true}
+  - {id: norm-fused-add-rmsnorm-l1, tier: L1, budget: 3600, needs_gpu: true}
   - {id: mla-sparse-l1, tier: L1, budget: 1800, needs_gpu: true}

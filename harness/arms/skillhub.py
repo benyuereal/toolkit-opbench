@@ -22,35 +22,24 @@ import shutil
 import subprocess
 
 ARM = "D"
+# 同 C 臂：不换用户就等于能读答案。
+USER = "opb_d"
 SKILLHUB_ROOT = "/workspace/SkillHub"
 LINK_NAME = "skillhub"
 # 副本里的 plugin 根：cwd/skillhub/.claude-plugin/plugin.json + cwd/skillhub/skills/
 PLUGIN_SUBDIR = LINK_NAME
 
-# 只列名字和一句话用途，不指定"这个任务用哪个"。
-# 清单来自 SkillHub/README.md 的 catalog（44 个里挑与本项目相关的）。
+# 中性说明：只说明"是什么、入口在哪、怎么调"。类别说明（如"有 kernel 优化
+# loop 类 skill"）合格；具体算子名 / 具体 skill 名 / 具体文件路径一律不写。
+# —— 业主 2026-11-24 判据，锁定此版本，不再微调。
 CLAUDE_MD = """# 本机已安装的 skillhub 插件
 
-用 `Skill` 工具调用，参数格式 `skillhub:<名字>`。
-全部 skill 在 `{plugin}/skills/<名字>/`，每个目录有 SKILL.md。
+这是一套 Agent Skills 插件，用 `Skill` 工具加载，参数格式 `skillhub:<名字>`。
+skill 都在 `{plugin}/skills/` 下，每个子目录是一个 skill，目录里的 SKILL.md 描述它做什么、怎么用。
+其中有做 A/B 实验 + 判定的 kernel 优化 loop 类 skill，按需加载。
 
-## 与本项目相关的
-
-kernel 优化：
-  lightop-kernel-agent-loop（**自主优化 LightOp 融合算子的 loop**）
-  lightop-kernel-knowledge · kernel-hip-optimize · kernel-hip-baseline
-  kernel-hip-handbook · kernel-triton-optimize · kernel-triton-baseline
-  kernel-model-triage
-
-调优 / 剖析：
-  gemm-tuning · hcu-aiter-moe-tuning · dcu-profiler-report
-  profile-hipprof-analysis · llm-torch-profiler-analysis
-  triton-dcu-profiler-report · sglang-sota-humanize-loop
-
-环境 / 排查：
-  hy-smi · dcu-coredump-vmfault · hcu-monitor · hcu-cumask
-
-按任务需要**自行判断**该加载哪个。
+**加载哪个 skill、优化哪个算子、怎么实现，由你根据任务自行判断**——
+先按需查看 `skills/` 下有哪些 skill，再决定加载哪个。不要凭记忆假设。
 
 ## 本机事实
 
@@ -110,6 +99,9 @@ def stage_files(cwd: str) -> list[str]:
             "extraKnownMarketplaces": {},
         }, ensure_ascii=False, indent=2) + "\n")
     staged.append(os.path.relpath(settings, cwd))
+    import subprocess as _sp
+    _sp.run(["chown", "-R", "opb_d:opb_d", cwd], check=False)
+    _sp.run(["chmod", "-R", "u+rwX,go-rwx", cwd], check=False)
 
     with open(os.path.join(cwd, "CLAUDE.md"), "w", encoding="utf-8") as f:
         f.write(CLAUDE_MD.format(plugin=PLUGIN_SUBDIR))

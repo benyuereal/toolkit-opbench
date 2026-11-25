@@ -91,7 +91,11 @@ def main(argv=None) -> int:
     p.add_argument("--tasks", nargs="+", required=True)
     p.add_argument("--budget", type=int, default=None,
                    help="默认用题面自己写的时间预算")
-    p.add_argument("--max-usd", type=float, default=5.0)
+    p.add_argument("--max-usd", type=float, default=None,
+                   help="默认不设美元上限，让臂跑满题面写的时间预算。"
+                        "设了会和题面的 wall-time 预算互相打架——"
+                        "实测 $5 会在 ~33 分钟切断，60 分钟的题永远跑不完，"
+                        "而且三臂会被切在近似但不相同的时刻，Δ 被污染。")
     p.add_argument("--skip-baseline", action="store_true")
     p.add_argument("--arms", default="A,B,C")
     a = p.parse_args(argv)

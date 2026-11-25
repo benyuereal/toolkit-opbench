@@ -84,18 +84,35 @@ def check_task_complete() -> dict:
 
 
 def check_answer_isolated() -> dict:
-    """答案文件必须对 others 不可读（A 臂以 opbench 用户跑）。"""
+    """答案文件必须对 others 不可读（A 臂以 opbench 用户跑）。
+
+    三类都算答案文件：
+      * expect.md       —— 结论与评分细则
+      * definition.json —— 含 baseline_impl 等口径
+      * reference.py    —— **逐行可执行的正确实现**，读到它比读 expect.md
+                          更省事：直接抄语义，连猜都不用猜。
+
+    为什么必须按"others 位"（0o004）查而不是按没说 644 查：跑臂用的是
+    独立用户（opb_a/opb_c/opb_d），只要 others 有读权限就读得到。
+    reference.py 之前不在这张名单里，实测对三个臂用户全部可读——题面
+    白写，答案敞开。
+    """
     leaks = []
-    for p in glob.glob(os.path.join(ROOT, "tasks", "*", "expect.md")):
-        if os.stat(p).st_mode & 0o004:
-            leaks.append(os.path.relpath(p, ROOT))
-    for p in glob.glob(os.path.join(ROOT, "tasks", "*", "definition.json")):
-        if os.stat(p).st_mode & 0o004:
-            leaks.append(os.path.relpath(p, ROOT))
+    for pat, want in (
+        ("expect.md", "chmod 600"),
+        ("definition.json", "chmod 640"),
+        ("reference.py", "chmod 640"),
+    ):
+        for p in glob.glob(os.path.join(ROOT, "tasks", "*", pat)):
+            if os.stat(p).st_mode & 0o004:
+                leaks.append((os.path.relpath(p, ROOT), want))
     if leaks:
-        return _bad(f"{len(leaks)} 个答案文件对 others 可读",
-                    f"chmod 600 <expect.md> 640 <definition.json>；例如 {leaks[:2]}")
-    return _ok("答案文件均隔离")
+        return _bad(
+            f"{len(leaks)} 个答案文件对 others 可读",
+            "按类型收紧：expect.md → 600，definition.json / reference.py → 640。"
+            "例如：" + "；".join(f"{w} {p}" for p, w in leaks[:2]),
+        )
+    return _ok("答案文件均隔离（expect/definition/reference）")
 
 
 def check_baseline() -> dict:

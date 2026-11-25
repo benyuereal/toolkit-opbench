@@ -107,8 +107,33 @@ def current_sclk() -> int | None:
 
     多卡取**最小值**：只要有一张卡在降频，拿别的卡的读数当"机器状态"
     就会把降频状态测成工作档。
+
+    ⚠️ 这是"整机状态"，**不是"我正在用的那张卡"**。绑卡测量请用
+    `sclk_of_device(dev)`：实测出现过测的是 1350 的卡 4、却因为别的卡
+    在 600 而把基线记成 600 的情况。
     """
     return current_sclk_detail()["min_mhz"]
+
+
+def sclk_of_device(dev: int | None = None) -> int | None:
+    """读**指定卡**的 sclk（MHz）。dev=None 时用 CUDA_VISIBLE_DEVICES 的第一张。
+
+    为什么要单独一个函数：`current_sclk()` 取全卡最小值，是为"整机能不能测"
+    设计的。但绑卡测量时那个数会误导——实测卡 4 在 1350、其余在 600，
+    基线却记成 600，让人以为是在降频档上测的。
+    """
+    detail = current_sclk_detail()
+    mhz = detail.get("mhz") or []
+    if not mhz:
+        return None
+    if dev is None:
+        vis = os.environ.get("CUDA_VISIBLE_DEVICES") or os.environ.get(
+            "HIP_VISIBLE_DEVICES") or ""
+        first = vis.split(",")[0].strip() if vis else ""
+        dev = int(first) if first.isdigit() else 0
+    if 0 <= dev < len(mhz):
+        return mhz[dev]
+    return None
 
 
 def current_sclk_detail(samples: int = 1, interval_s: float = 0.4) -> dict:

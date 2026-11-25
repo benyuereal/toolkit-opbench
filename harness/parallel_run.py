@@ -76,7 +76,8 @@ def main(argv=None) -> int:
     p.add_argument("--tasks", nargs="+", required=True)
     p.add_argument("--arms", default="A,B,C")
     p.add_argument("--budget", type=int, default=1800)
-    p.add_argument("--max-usd", type=float, default=5.0)
+    p.add_argument("--max-usd", type=float, default=None,
+                   help="默认不设美元上限（理由见 harness/cycle.py 同名参数）")
     p.add_argument("--threshold", type=float, default=20.0)
     a = p.parse_args(argv)
 
