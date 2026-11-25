@@ -1,3 +1,2 @@
-{"axes": {"M": 4096}, "inputs": {"x": {"type": "random"}, "residual": {"type": "random"}, "weight": {"type": "random"}}, "uuid": "pub-4096", "split": "public"}
 {"axes": {"M": 8192}, "inputs": {"x": {"type": "random"}, "residual": {"type": "random"}, "weight": {"type": "random"}}, "uuid": "pub-8192", "split": "public"}
 {"axes": {"M": 13312}, "inputs": {"x": {"type": "random"}, "residual": {"type": "random"}, "weight": {"type": "random"}}, "uuid": "hold-13312", "split": "holdout"}

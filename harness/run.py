@@ -44,18 +44,19 @@ RUNS_DIR = os.path.join(ROOT, "runs")
 BASELINES_DIR = os.path.join(ROOT, "baselines")
 TRACE_PATH = os.path.join(RUNS_DIR, "trace.jsonl")
 CLAUDE = "/opt/opbench-node/bin/claude"
-# 被测 agent 连 API 用的环境文件。默认 opendesign.env；模型换端点时用
-# OPBENCH_ENV 覆盖（例如 qwen 走 tosc.env）。**三臂必须用同一个**，
-# 否则测出来的差是模型差，不是 skill 差。
-ENV_FILE = os.environ.get("OPBENCH_ENV", "/workspace/opendesign.env")
+# 被测 agent 连 API 用的环境文件。默认 tosc.env（qwen3.8-27b，实测有额度）；
+# 三个 opendesign*.env 全 402。三臂必须用同一个，否则测出的是模型差，不是 skill 差。
+# 模型换端点时用 OPBENCH_ENV 覆盖。
+ENV_FILE = os.environ.get("OPBENCH_ENV", "/workspace/tosc.env")
 # 某些端点（qwen 的 OpenCode 网关）只接受有限的 reasoning effort 档位，
 # CLI 默认的 high 会被 400 拒掉。用 OPBENCH_EFFORT 传，空则不传该 flag。
 EFFORT = os.environ.get("OPBENCH_EFFORT", "")
 
 # 三臂共用的工具白名单。改它等于改实验条件，三臂必须同步。
 ALLOWED_TOOLS = ("Bash", "Read", "Write", "Edit", "Glob", "Grep", "TodoWrite")
-# token 兜底（CLI 只提供美元预算）；题面预算 1800s 一般的花费远低于此
-DEFAULT_MAX_USD = 5.0
+# 默认**不设**美元上限（None）。实测 5.0 会在 33 分钟切断三臂，
+# 把 3600s 的时间预算架空。要设就显式传 --max-usd。
+DEFAULT_MAX_USD = None
 
 # 产物里允许/应该出现的顶层条目。其余一律视为 agent 自造，
 # 记录但不影响判分（判分只认 report.md/scripts/results/solution.json）。
@@ -158,6 +159,10 @@ def prepare_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
     n, cwd = _next_attempt(base)
     os.makedirs(cwd)
     os.chmod(cwd, 0o777)
+    # 题面要求脚本放 scripts/、原始输出放 results/。
+    # Claude 的 Write 不自动建父目录 —— 实测 C 臂写 scripts/x.py 失败后反复查权限跑偏。
+    for _sub in ("scripts", "results"):
+        os.makedirs(os.path.join(cwd, _sub), exist_ok=True)
     return cwd
 
 
@@ -165,6 +170,36 @@ def prepare_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
 # 读到 expect.md（答案）、definition.json（含 expected_verdict）、
 # 以及 B/C 臂的产物。实测 opbench 用户对仓库全部可读。
 ISOLATED_ROOT = "/tmp/opbench-run"
+
+
+
+def _claim_for_arm(arm: str, path: str) -> None:
+    """把 path 及其下两级交给该臂的用户，并设为 700。"""
+    if os.geteuid() != 0:
+        return
+    user = getattr(_arm_module(arm), "USER", None)
+    if not user:
+        return
+    try:
+        import pwd
+        pw = pwd.getpwnam(user)
+    except (ImportError, KeyError):
+        return
+    targets = [path]
+    try:
+        for task in os.listdir(path):
+            tp = os.path.join(path, task)
+            targets.append(tp)
+            for sub in os.listdir(tp):
+                targets.append(os.path.join(tp, sub))
+    except OSError:
+        pass
+    for t in targets:
+        try:
+            os.chown(t, pw.pw_uid, pw.pw_gid)
+            os.chmod(t, 0o700)
+        except OSError:
+            pass
 
 
 def isolated_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
@@ -179,6 +214,13 @@ def isolated_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
     n, cwd = _next_attempt(base)
     os.makedirs(cwd)
     os.chmod(cwd, 0o777)
+    # 题面要求脚本放 scripts/、原始输出放 results/。
+    # Claude 的 Write 不自动建父目录 —— 实测 C 臂写 scripts/x.py 失败后反复查权限跑偏。
+    for _sub in ("scripts", "results"):
+        os.makedirs(os.path.join(cwd, _sub), exist_ok=True)
+    # 一臂一用户：把 arm-X 整棵树交给该臂用户并 700，别的臂（另一个用户）就进不来。
+    # 只换用户不够——三个臂同用 opbench 时，它们仍能互读对方的 cwd（实测 C 读了 arm-A 的 report.md）。
+    _claim_for_arm(arm, os.path.join(ISOLATED_ROOT, f"arm-{arm.upper()}"))
     return cwd
 
 
@@ -226,7 +268,7 @@ def select_attempt(base: str) -> str | None:
     return first if os.path.isdir(first) else None
 
 
-def build_cmd(task_dir: str, budget_s: int, max_usd: float = DEFAULT_MAX_USD,
+def build_cmd(task_dir: str, budget_s: int, max_usd: float | None = DEFAULT_MAX_USD,
               plugin_dir: str | None = None) -> list[str]:
     """组命令。prompt 由 stdin 给，所以这里不含题面。
 
@@ -241,8 +283,17 @@ def build_cmd(task_dir: str, budget_s: int, max_usd: float = DEFAULT_MAX_USD,
         "-p",
         "--output-format", "json",
         "--allowedTools", *ALLOWED_TOOLS,
-        "--max-budget-usd", f"{max_usd:.2f}",
+        # Claude Code 把 .py 判成 sensitive file，-p 非交互模式下无法确认 →
+        # 写自研 kernel 直接被拒（实测 C 臂只能 Write 到 scripts/ 再 cp 绕过去）。
+        # 隔离边界由 Unix 权限保证（700 + 一臂一用户），不靠这个开关。
+        "--dangerously-skip-permissions",
     ]
+    # 美元上限只在显式给了正数时才传。**默认不设**：实测 --max-usd 5.0
+    # 会在 33 分钟就把三臂全部切断（A $4.89 / C $5.01 / D $4.98），
+    # 把 3600s 的时间预算架空，C 只差 0.01 美元就判 error —— 样本被
+    # 美元切掉而不是被能力切掉，Δ 不可用。预算约束只留 wall time。
+    if max_usd is not None and max_usd > 0:
+        cmd += ["--max-budget-usd", f"{max_usd:.2f}"]
     if EFFORT:
         cmd += ["--effort", EFFORT]
     model = os.environ.get("OPBENCH_MODEL", "")
@@ -254,10 +305,12 @@ def build_cmd(task_dir: str, budget_s: int, max_usd: float = DEFAULT_MAX_USD,
 
 
 def _load_env() -> dict:
-    """读 /workspace/opendesign.env（KEY=VALUE），叠加到当前环境。
+    """读 ENV_FILE（KEY=VALUE），返回 dict。走 subprocess 的 env= 传进去，
+    不走 shell source，所以不受 export 影响。
 
-    用 su - opbench 时登录 shell 不会带上这些变量；A 臂要靠它们连 API。
-    值不回显、不落盘。
+    **坑（业主实测）：tosc.env 的 `ANTHROPIC_BASE_URL` 结尾带 `/`。**
+    原样传进去，Claude Code 会拼成 `...4001//v1/messages` → 404。
+    所以 URL 类 key 统一 rstrip("/")。
     """
     env = {}
     if not os.path.isfile(ENV_FILE):
@@ -271,7 +324,11 @@ def _load_env() -> dict:
             key = key.strip()
             if key.startswith("export "):
                 key = key[len("export "):].strip()
-            env[key] = val.strip().strip('"').strip("'")
+            val = val.strip().strip('"').strip("'")
+            # URL 类 key 去尾斜杠，避免拼出 //v1/... → 404
+            if key.endswith("URL") or key.endswith("_URL"):
+                val = val.rstrip("/")
+            env[key] = val
     return env
 
 
@@ -312,24 +369,73 @@ def stated_budget_s(task_md: str) -> int | None:
     return int(m.group(1)) * 60 if m else None
 
 
-def assert_arms_comparable(task_id: str, budget_s: int, max_usd: float) -> list[str]:
+# 各臂的 attempt 目录可能落在两处：仓库内 runs/（B/C/D 默认）与
+# /tmp/opbench-run/（A 臂与一臂一用户隔离后所有臂）。守卫必须两处都查，
+# 否则"只扫 runs/"时守卫形同虚设（实测三臂在 /tmp 下，守卫一次都没拦过）。
+def _guard_roots() -> tuple[str, ...]:
+    """每次调用时重算，测试可以 patch RUNS_DIR 或 ISOLATED_ROOT 生效。"""
+    iso = globals().get("ISOLATED_ROOT", "/tmp/opbench-run")
+    return (RUNS_DIR, iso)
+
+
+def _meta_of(arm: str, task_id: str) -> dict | None:
+    for root in _guard_roots():
+        p = os.path.join(root, f"arm-{arm}", task_id, "attempt-1", "meta.json")
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+    return None
+
+
+def _ended_naturally(arm: str, task_id: str) -> bool | None:
+    """该臂上一轮是自然结束，还是被预算/超时切断。
+
+    只有"自然结束"的样本才算真的用到了它的预算上限；被切断的样本
+    说明上限本身成了约束。重跑一个被切断的臂时不必强求同一上限——
+    否则永远无法把那个样本做完。
+
+    返回 **None** 表示无法判定（旧记录没有 `_stdout.jsonl`，
+    或文件里没有 result 行）。调用方必须把 None 当成"不可比"报出来，
+    **不能静默放行**——否则早期记录会绕过整个预算守卫。
+    """
+    meta = _meta_of(arm, task_id)
+    if not meta:
+        return None
+    if meta.get("status") == "timeout":
+        return False
+    for root in _guard_roots():
+        p = os.path.join(root, f"arm-{arm}", task_id, "attempt-1", "_stdout.jsonl")
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    lines = [l for l in f if l.strip().startswith("{")]
+                if not lines:
+                    return None
+                last = __import__("json").loads(lines[-1])
+                return last.get("terminal_reason") in (None, "completed")
+            except (OSError, ValueError):
+                return None
+    return None
+
+
+def assert_arms_comparable(task_id: str, budget_s: int, max_usd: float | None) -> list[str]:
     """同一道题的已有臂必须与新这一轮用同一组预算，否则拒绝开跑。
 
     三臂对照的全部意义是"只有上下文不同"。预算（wall time 与美元上限）
     只要有一项不同，测出来的就是预算差，不是 skill 差——而且这种差异
     会伪装成结论，比明显报错危险得多。
+
+    **例外**：上一轮被预算切断的臂（terminal_reason == budget_exhausted /
+    status == timeout），重跑时允许换预算——那个样本本来就不完整，
+    强求同一上限等于永远修不好它。
     """
-    base = os.path.join(RUNS_DIR)
     problems = []
-    for arm in ("A", "B", "C"):
-        d = os.path.join(base, f"arm-{arm}", task_id, "attempt-1")
-        meta_path = os.path.join(d, "meta.json")
-        if not os.path.isfile(meta_path):
-            continue
-        try:
-            with open(meta_path, encoding="utf-8") as f:
-                meta = json.load(f)
-        except (OSError, json.JSONDecodeError):
+    for arm in ("A", "B", "C", "D"):
+        meta = _meta_of(arm, task_id)
+        if not meta:
             continue
         prev_budget = meta.get("budget_s")
         if prev_budget is not None and int(prev_budget) != int(budget_s):
@@ -337,24 +443,39 @@ def assert_arms_comparable(task_id: str, budget_s: int, max_usd: float) -> list[
                 f"arm-{arm} 用的是 budget={prev_budget}s，这次是 {budget_s}s"
             )
         prev_usd = meta.get("max_usd")
-        if meta.get("max_usd_backfilled"):
-            # 事后补录的值：来源写在 max_usd_source 里。仍参与比对，
-            # 但不假装它是运行当时的记录。
-            if prev_usd is not None and abs(float(prev_usd) - float(max_usd)) > 1e-9:
+        natural = _ended_naturally(arm, task_id)
+        if natural is None:
+            # 无法判定 = 旧记录缺 _stdout.jsonl。不能当"自然结束"放行，
+            # 也不能当"被切断"跳过——两种都会让守卫静默失效。
+            problems.append(
+                f"arm-{arm} 的 attempt-1 缺 _stdout.jsonl，"
+                "无法判断上一轮是否被预算切断；删掉该 attempt 再重跑"
+            )
+            continue
+        if not natural:
+            # 被切断的臂不参与美元比对
+            continue
+        if prev_usd is None and meta.get("max_usd_backfilled") is not True:
+            if max_usd is not None:
+                # 旧记录没记美元上限、这次又设了 → 无法核对，报出来
                 problems.append(
-                    f"arm-{arm} 用过 max_usd={prev_usd}（事后补录），这次是 {max_usd}"
+                    f"arm-{arm} 的 meta 没有记录 max_usd，而这次设了 {max_usd}"
                 )
             continue
-        if prev_usd is None:
-            # 早期记录没有这个字段。不能默认它相等——那等于放过了
-            # "用 5 美元跑 C、用 3 美元跑 A" 这种不可比。
-            problems.append(
-                f"arm-{arm} 的 meta 没有记录 max_usd，无法核对美元上限是否一致"
-            )
-        elif abs(float(prev_usd) - float(max_usd)) > 1e-9:
-            problems.append(
-                f"arm-{arm} 用的是 max_usd={prev_usd}，这次是 {max_usd}"
-            )
+        if prev_usd is not None and max_usd is not None:
+            if abs(float(prev_usd) - float(max_usd)) > 1e-9:
+                problems.append(
+                    f"arm-{arm} 用的是 max_usd={prev_usd}，这次是 {max_usd}"
+                )
+        elif prev_usd is not None and max_usd is None:
+            # 上一轮有上限、这轮取消：只有上一轮利用率远低于上限才算可比
+            mu = meta.get("model_usage") or {}
+            cost = sum((v.get("costUSD") or 0) for v in mu.values())
+            if cost >= float(prev_usd) * 0.95:
+                problems.append(
+                    f"arm-{arm} 上一轮花到 ${cost:.2f}/{prev_usd}（贴近上限），"
+                    "取消上限会让它跑得比别的臂久，不可比"
+                )
     if problems:
         raise ValueError(
             f"{task_id}: 三臂预算不一致，拒绝开跑（{'；'.join(problems)}）。"
@@ -364,7 +485,7 @@ def assert_arms_comparable(task_id: str, budget_s: int, max_usd: float) -> list[
 
 
 def run_one(task_id: str, arm: str, budget_s: int,
-            max_usd: float = DEFAULT_MAX_USD, dry_run: bool = False) -> dict:
+            max_usd: float | None = DEFAULT_MAX_USD, dry_run: bool = False) -> dict:
     arm = arm.upper()
     td = task_dir(task_id)
     defn = load_definition(td)
@@ -382,6 +503,13 @@ def run_one(task_id: str, arm: str, budget_s: int,
             f"要么给足 {stated}s，要么改题面的预算说明（改题面要重新记哈希）"
         )
     prompt = mod.build_prompt(task_md)
+    # 测量口径由 harness 统一下发，三臂逐字相同。
+    # 不这么做的话各臂会自选 axes，测出来的根本不是同一个算子
+    # （实测 A 臂 SKV=16384/TOPK=2048 vs C/D 8192/256，耗时差 15x）。
+    from harness import measure_spec
+    _spec = measure_spec.render(task_id)
+    if _spec:
+        prompt = prompt.rstrip() + _spec
 
     from bench.check import integrity
 
@@ -470,7 +598,7 @@ def run_one(task_id: str, arm: str, budget_s: int,
                 record["gpu_visible_env"] = os.environ.get("CUDA_VISIBLE_DEVICES")
                 record["sclk_mhz"] = dcu.ramp_to_work_clock()
                 record["status"], record["exit_code"], record["wall_time_s"] = _execute(
-                    cwd, prompt, arm, budget_s, max_usd, record
+                    cwd, prompt, arm, budget_s, max_usd, record, plugin_dir=plugin_dir,
                 )
         else:
             # 串行模式：等锁 + 挑空闲卡（原逻辑）
@@ -523,14 +651,30 @@ def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
     cmd = build_cmd(cwd, budget_s, max_usd, plugin_dir=plugin_dir)
     env = os.environ.copy()
     env.update(_load_env())
+    # 绑卡并行：把卡号写进子进程环境。DCU 上 torch 认 HIP_VISIBLE_DEVICES，
+    # 同时设 CUDA_VISIBLE_DEVICES 兼容老代码/第三方库。
+    _dev = os.environ.get("OPBENCH_DEVICE", "")
+    if _dev:
+        env["HIP_VISIBLE_DEVICES"] = _dev
+        env["CUDA_VISIBLE_DEVICES"] = _dev
 
     prefix = _su_prefix(arm)
     if prefix:
         # su - <user> -c "<cmd>"：登录 shell 会丢掉 LAUNCHER 的环境，
-        # 而 A 臂连 API 全靠 opendesign.env 里的 base_url/token。
+        # 而 A 臂连 API 全靠 ENV_FILE 里的 base_url/token。
         # 在子 shell 里显式 source；值不回显。
+        #
+        # **两条路径都要去尾斜杠**：`_load_env()` 给非 su 路径去掉了 URL 尾斜杠，
+        # 但 su 分支是直接在子 shell 里 source env 文件，不走 _load_env()，
+        # 所以这里再 rstrip 一次，否则 tosc.env 的 ...4001/ 会拼成 //v1/... → 404。
+        _pin = ""
+        if _dev:
+            _pin = (f"export HIP_VISIBLE_DEVICES={_dev} "
+                    f"CUDA_VISIBLE_DEVICES={_dev} && ")
         inner = (
             f"cd {_shq(cwd)} && set -a && . {_shq(ENV_FILE)} && set +a && "
+            f"{_pin}"
+            f"ANTHROPIC_BASE_URL=${{ANTHROPIC_BASE_URL%/}} && "
             f"{_quote_for_shell(cmd)}"
         )
         argv = prefix + [inner]
@@ -589,7 +733,32 @@ def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
         return "error", proc.returncode, wall
     if parsed is None:
         return "error", proc.returncode, wall
+
+    # 2026-11-25 实测：C 臂三题调用 loop.py 的次数都是 0 —— 它退化成了"挂了 skill 的裸 CC"，
+    # 实验最核心的假设（强制迭代）根本没被验证。所以这里硬卡：没有流水就不算数。
+    ev = _loop_evidence(cwd)
+    record["loop_evidence"] = ev
+    if _requires_loop(arm) and not ev:
+        return "invalid:no_loop_evidence", proc.returncode, wall
     return "ok", proc.returncode, wall
+
+
+
+def _requires_loop(arm: str) -> bool:
+    """哪些臂必须留下 loop 迭代证据。
+
+    目前只有 C 臂（toolkit-skills）：它的 loop.py 会把流水写到 <卡片>/runs/loop/*.jsonl。
+    D 臂（SkillHub）的 loop 是 skill 形态、产物路径不统一，暂不做硬校验。
+    """
+    return arm.upper() == "C"
+
+
+def _loop_evidence(cwd: str) -> list[str]:
+    """在 cwd 下找 loop.py 的迭代流水。"""
+    import glob
+    got = set(glob.glob(os.path.join(cwd, "**", "runs", "loop", "*.jsonl"), recursive=True))
+    got.update(glob.glob(os.path.join(cwd, "runs", "loop", "*.jsonl")))
+    return sorted(got)
 
 
 def _kill_tree(pid: int) -> None:

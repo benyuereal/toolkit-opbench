@@ -9,6 +9,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from bench.check import hallucination, integrity, leak
 
@@ -360,6 +361,62 @@ class TestArms(unittest.TestCase):
                 c.stage_files(d)
 
 
+class TestClaudeMdNeutrality(unittest.TestCase):
+    """C/D 臂的 CLAUDE.md 必须中性。
+
+    边界（业主 2026-11-24）：只允许说明"用什么驱动（loop.py）+ 入口在哪
+    + 怎么调"。**具体什么算子在哪、用哪个 skill、该怎么实现，不可以写死**——
+    必须让 agent 自己判断。点名具体算子卡/skill 等于把答案的一半喂给它，
+    就测不出"会不会自己找"了。
+
+    这个测试把边界变成机器守卫，防止以后有人又把具体算子/skill 名写回去。
+    """
+
+    def _claude_md(self, arm_mod):
+        import tempfile
+        d = tempfile.mkdtemp()
+        os.chmod(d, 0o777)
+        arm_mod.stage_files(d)
+        md = os.path.join(d, "CLAUDE.md")
+        text = open(md, encoding="utf-8").read()
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+        return text
+
+    def test_c_arm_names_only_driver_not_operator_cards(self):
+        from harness.arms import c
+
+        md = self._claude_md(c)
+        # 允许：loop.py（驱动）+ 入口路径 + 调用方式
+        self.assertIn("loop.py", md)
+        # 禁止：具体算子卡名（op-roofline / op-fused-add-rmsnorm / op-gemm-fp8 ...）
+        #       —— 点名某个算子卡等于告诉它"用这个"，越界
+        import re
+        op_cards = re.findall(r"\bop-[a-z]+-[a-z0-9-]+\b", md)
+        self.assertEqual(op_cards, [], f"C 臂 CLAUDE.md 点名了具体算子卡: {op_cards}")
+
+    def test_d_arm_names_only_mechanism_not_skills(self):
+        from harness.arms import skillhub
+
+        md = self._claude_md(skillhub)
+        # 允许：说明有 skill 机制 + 入口在哪 + Skill 工具怎么用
+        self.assertIn("skills/", md)
+        self.assertIn("Skill", md)
+        # 禁止：具体 skill 名（点名等于告诉它"用这个"）
+        named = [s for s in (
+            "lightop-kernel-agent-loop", "lightop-kernel-knowledge",
+            "kernel-hip-optimize", "kernel-hip-baseline", "kernel-hip-handbook",
+            "kernel-triton-optimize", "kernel-triton-baseline", "kernel-model-triage",
+            "gemm-tuning", "dcu-profiler-report", "triton-kernel-agent-loop",
+        ) if s in md]
+        self.assertEqual(named, [], f"D 臂 CLAUDE.md 点名了具体 skill: {named}")
+
+    def test_c_prompt_is_bare_task(self):
+        """C 臂 prompt 必须是纯题面（skill 走 cwd 环境，不靠 prompt 提示）。"""
+        from harness.arms import c
+        self.assertEqual(c.build_prompt("# 题面\n内容"), "# 题面\n内容")
+
+
 class TestArmBudgetComparability(unittest.TestCase):
     """三臂只许差上下文，不许差预算。"""
 
@@ -372,13 +429,55 @@ class TestArmBudgetComparability(unittest.TestCase):
         d = os.path.join(runs, "arm-A", "t9", "attempt-1")
         os.makedirs(d)
         with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
-            _json.dump({"budget_s": 1800, "max_usd": 3.0}, f)
-        with unittest.mock.patch.object(run, "RUNS_DIR", runs):
+            _json.dump({"budget_s": 1800, "max_usd": 3.0,
+                        "model_usage": {"m": {"costUSD": 1.0}}}, f)
+        # 自然结束的证据：守卫靠 _stdout.jsonl 的 terminal_reason 判定
+        with open(os.path.join(d, "_stdout.jsonl"), "w", encoding="utf-8") as f:
+            _json.dump({"type": "result", "terminal_reason": "completed"}, f)
+        with mock.patch.object(run, "RUNS_DIR", runs), \
+             mock.patch.object(run, "ISOLATED_ROOT", "/nonexistent-iso"):
             with self.assertRaises(ValueError) as ctx:
                 run.assert_arms_comparable("t9", 1800, 5.0)
             self.assertIn("max_usd", str(ctx.exception))
             # 一致时不报错
             self.assertEqual(run.assert_arms_comparable("t9", 1800, 3.0), [])
+
+    def test_missing_stdout_is_reported_not_skipped(self):
+        """缺 _stdout.jsonl 无法判定 → 必须报出来，不能静默放行。"""
+        import json as _json
+        import tempfile
+        from harness import run
+
+        runs = tempfile.mkdtemp()
+        d = os.path.join(runs, "arm-A", "t9", "attempt-1")
+        os.makedirs(d)
+        with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+            _json.dump({"budget_s": 1800, "max_usd": 3.0}, f)
+        with mock.patch.object(run, "RUNS_DIR", runs), \
+             mock.patch.object(run, "ISOLATED_ROOT", "/nonexistent-iso"):
+            with self.assertRaises(ValueError) as ctx:
+                run.assert_arms_comparable("t9", 1800, 3.0)
+            self.assertIn("_stdout.jsonl", str(ctx.exception))
+
+    def test_budget_exhausted_arm_allows_new_usd(self):
+        """被预算切断的臂允许换美元上限重跑（否则永远修不好那个样本）。"""
+        import json as _json
+        import tempfile
+        from harness import run
+
+        runs = tempfile.mkdtemp()
+        d = os.path.join(runs, "arm-C", "t9", "attempt-1")
+        os.makedirs(d)
+        with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+            _json.dump({"budget_s": 1800, "max_usd": 5.0,
+                        "model_usage": {"m": {"costUSD": 5.01}}}, f)
+        with open(os.path.join(d, "_stdout.jsonl"), "w", encoding="utf-8") as f:
+            _json.dump({"type": "result",
+                        "terminal_reason": "budget_exhausted"}, f)
+        with mock.patch.object(run, "RUNS_DIR", runs), \
+             mock.patch.object(run, "ISOLATED_ROOT", "/nonexistent-iso"):
+            # C 被切断 → 取消上限重跑应放行
+            self.assertEqual(run.assert_arms_comparable("t9", 1800, None), [])
 
     def test_mismatched_wall_budget_refused(self):
         import json as _json
@@ -390,7 +489,7 @@ class TestArmBudgetComparability(unittest.TestCase):
         os.makedirs(d)
         with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
             _json.dump({"budget_s": 600, "max_usd": 3.0}, f)
-        with unittest.mock.patch.object(run, "RUNS_DIR", runs):
+        with mock.patch.object(run, "RUNS_DIR", runs):
             with self.assertRaises(ValueError):
                 run.assert_arms_comparable("t9", 1800, 3.0)
 
@@ -398,7 +497,7 @@ class TestArmBudgetComparability(unittest.TestCase):
         import tempfile
         from harness import run
 
-        with unittest.mock.patch.object(run, "RUNS_DIR", tempfile.mkdtemp()):
+        with mock.patch.object(run, "RUNS_DIR", tempfile.mkdtemp()):
             self.assertEqual(run.assert_arms_comparable("none", 1800, 3.0), [])
 
 
@@ -506,7 +605,7 @@ class TestAnswerIsolation(unittest.TestCase):
         import tempfile
         from harness import run
 
-        with unittest.mock.patch.object(run, "ISOLATED_ROOT", tempfile.mkdtemp()):
+        with mock.patch.object(run, "ISOLATED_ROOT", tempfile.mkdtemp()):
             p = run.isolated_cwd("t1", "A", dry_run=True)
         self.assertFalse(p.startswith(run.ROOT))
         self.assertTrue(os.path.isdir(p))
@@ -525,8 +624,8 @@ class TestAnswerIsolation(unittest.TestCase):
                 returncode = 0
             return R()
 
-        with unittest.mock.patch.object(run, "task_dir", return_value=d), \
-             unittest.mock.patch.object(run, "ROOT", d), \
+        with mock.patch.object(run, "task_dir", return_value=d), \
+             mock.patch.object(run, "ROOT", d), \
              unittest.mock.patch.object(run.subprocess, "run", side_effect=fake_run):
             with self.assertRaises(PermissionError):
                 run.guard_answer_readable("t1", "A")
