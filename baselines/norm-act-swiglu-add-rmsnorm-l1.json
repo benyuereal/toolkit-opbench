@@ -1,9 +1,9 @@
 {
   "task": "norm-act-swiglu-add-rmsnorm-l1",
-  "t_b_ms": 0.3281599879264831,
-  "t_sol_ms": 0.1491308088888889,
+  "t_b_ms": 0.2990399897098541,
+  "t_sol_ms": 0.12427567407407404,
   "sclk_seen_mhz": [
-    600
+    1350
   ],
   "sclk_note": "auto DPM 在 1200/1350 间跳变；实测 275–286 TF 与 constants 的 279 TF@1350 一致。**不要用 sclk 做频率折算**——单次读数会落到空闲档，折算出的达成率会虚高 10–100%。",
   "baseline_impl": "harness.implementations.lightop_add_rmsnorm_swiglu",
@@ -11,12 +11,12 @@
   "peak_value": 1350.0,
   "peak_kind": "peak_achievable",
   "peak_status": "measured",
-  "work": "M*H*2*2 + M*I*2*2",
+  "work": "2*M*H*2 + M*I*2",
   "work_unit": "byte",
-  "warmup": 10,
-  "iters": 30,
+  "warmup": 20,
+  "iters": 50,
   "flush_bytes": 16777216,
-  "sclk_mhz": 600,
+  "sclk_mhz": 1350,
   "shapes": [
     {
       "uuid": "pub-8192",
@@ -25,10 +25,10 @@
         "I": 2048,
         "M": 8192
       },
-      "median_ms": 0.32815998792648315,
-      "mad_ms": 0.010879993438720703,
-      "cv": 0.03315453997748842,
-      "sclk_mhz": 600,
+      "median_ms": 0.2990399897098541,
+      "mad_ms": 0.0006404966115951538,
+      "cv": 0.002141842675344527,
+      "sclk_mhz": 1350,
       "clock_stable": true
     }
   ],

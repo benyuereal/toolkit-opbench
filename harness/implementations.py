@@ -73,10 +73,7 @@ aiter_topk_softmax_buf._cache = {}
 def lightop_add_rmsnorm_swiglu(x, residual, weight, eps: float = 1e-6):
     """fused_add_rms_norm + fuse_silu_and_mul 两步组合（基线实现）。
 
-    为什么是两步而不是一步：本机 lightop 0.6.0 / aiter 0.1.6 都**没有**
-    「add + rmsnorm + swiglu」三合一入口（2026-11-25 已核）。
-    所以基线只能是"两步法"，它比理想的一步融合多一趟中间 h（宽度 2I）
-    的 HBM 往返 —— 这正是本题要给 agent 留出的优化空间。
+    本机 lightop 0.6.0 / aiter 0.1.6 没有三合一入口（2026-11-25 已核）。
 
     **原地改写**：`fused_add_rms_norm` 把结果写回 x 和 residual。
     调用方每轮必须喂独立副本（definition 里已声明 inplace_inputs）。

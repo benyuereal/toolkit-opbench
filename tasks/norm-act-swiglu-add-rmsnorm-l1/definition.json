@@ -64,7 +64,7 @@
   "dcu": {
     "peak_constant": "peak_achievable:copy",
     "roofline_bandwidth": "peak_achievable:copy",
-    "work": "M*H*2*2 + M*I*2*2",
+    "work": "2*M*H*2 + M*I*2",
     "work_unit": "byte",
     "min_l2_flush_mb": 16,
     "needs_gpu": true,
