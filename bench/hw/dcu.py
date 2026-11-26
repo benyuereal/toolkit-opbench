@@ -25,6 +25,14 @@ HY_SMI = "hy-smi"
 LOCK_PATH = "/tmp/opbench-gpu.lock"
 BUSY_THRESHOLD = 20.0
 
+# 判"这张卡能不能派活"的显存门槛（GB）。
+#
+# 这个数不是拍脑袋：本仓最大的一道题 `mhc-post-l1` 在 M=16384 档，
+# 参考实现峰值 4.91 GB（实测 2026-11-26）。留一倍余量给 agent 自己的
+# 临时缓冲和 Triton/tilelang 的 JIT，取 10 GB。
+# 改这个值时请同时确认 `python3 -m harness.ready` 的 correctness 项仍通过。
+MIN_FREE_VRAM_GB = 10.0
+
 # 实测档位 → MHz（hy-smi -s 的 Supported sclk frequencies）
 SCLK_LEVELS_MHZ = {
     0: 300, 1: 600, 2: 800, 3: 1000, 4: 1150,
@@ -172,6 +180,26 @@ def current_sclk_detail(samples: int = 1, interval_s: float = 0.4) -> dict:
     }
 
 
+def _free_vram_gb(n: int) -> dict[int, float]:
+    """每张卡当前可用的 GB。拿不到的卡不出现在结果里（调用方按"未知"处理）。
+
+    只用 `torch.cuda.mem_get_info()`（不初始化 context 也能读，但为稳妥仍
+    包在 try 里）：CPU 机器、单元测试、没装 torch 的环境都会走到 except。
+    """
+    out: dict[int, float] = {}
+    try:
+        import torch
+    except ImportError:
+        return out
+    for i in range(n):
+        try:
+            free, _total = torch.cuda.mem_get_info(i)
+            out[i] = free / 2**30
+        except Exception:
+            continue
+    return out
+
+
 def is_busy(threshold: float = BUSY_THRESHOLD) -> bool:
     """**所有**卡都忙才算忙？不——默认仍是"任一卡忙即忙"，见 free_devices。
 
@@ -184,12 +212,34 @@ def is_busy(threshold: float = BUSY_THRESHOLD) -> bool:
     return max(pcts) > threshold
 
 
-def free_devices(threshold: float = BUSY_THRESHOLD) -> list[int]:
-    """返回占用率 <= threshold 的卡号。读不到占用率返回空列表（按忙处理）。"""
+def free_devices(threshold: float = BUSY_THRESHOLD,
+                 min_free_gb: float = MIN_FREE_VRAM_GB) -> list[int]:
+    """返回**既没在算、又够显存**的卡号。
+
+    ## 为什么不能只看占用率
+
+    实测（2026-11-26 凌晨，本机）：8 张卡 HCU 全是 0%，看起来全空闲；
+    但卡 0–3 各只剩 4.9–6.9 GB 可用，其余被**容器外**的租户进程占着
+    （`hy-smi` 的 VRAM% 是 90%+，而本容器 `ps` 里只有 17 个进程，全是 shell）。
+
+    只看 HCU 会把这几张判成空闲，`--parallel-cards` 随即把题派上去，
+    然后第一道 mHC 的 M=16384 档（参考实现峰值 4.9 GB）就 OOM——
+    而 OOM 会被记成"这个臂实现有问题"，实际是调度器选错了卡。
+
+    数据源用 `torch.cuda.mem_get_info()` 而不是 hy-smi：前者是本进程
+    真正能拿到的量（含显存池碎片），后者是卡级总量，两者不等价。
+
+    读不到显存时**不因此排除**该卡——否则在没有 torch 的环境里
+    （单元测试、纯 CPU 机器）会一张卡都返回不了。
+    """
     pcts = _busy_pcts()
     if not pcts:
         return []
-    return [i for i, p in enumerate(pcts) if p <= threshold]
+    mem = _free_vram_gb(len(pcts))
+    return [
+        i for i, p in enumerate(pcts)
+        if p <= threshold and (mem.get(i) is None or mem[i] >= min_free_gb)
+    ]
 
 
 def pick_device(threshold: float = BUSY_THRESHOLD) -> int | None:
@@ -202,13 +252,18 @@ def pick_device(threshold: float = BUSY_THRESHOLD) -> int | None:
 
     为什么要挑卡而不是死等：8 张卡里经常只有一两张被别的会话占着。
     三臂都用**同一张**卡就保持了可比性——卡间差异不会混进 Δ。
+
+    挑**可用显存最多**的那张，不是编号最小的：实测本机卡 0–3 常被
+    容器外租户占到只剩 5 GB，而卡 4–7 有 139 GB。按编号取会稳定地
+    选到最差的那张。显存读不到时退回"编号最小"，保证老行为不变。
     """
     import torch
 
     free = free_devices(threshold)
     if not free:
         return None
-    dev = free[0]
+    mem = _free_vram_gb(max(free) + 1)
+    dev = max(free, key=lambda i: (mem.get(i, -1.0), -i))
     torch.cuda.set_device(dev)
     return dev
 

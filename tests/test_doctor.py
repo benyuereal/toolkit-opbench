@@ -96,6 +96,65 @@ class TestSclkParsing(unittest.TestCase):
             self.assertEqual(dcu._perf_levels(), ["auto", "manual"])
 
 
+class TestFreeDevicesVramGate(unittest.TestCase):
+    """空闲卡判据必须**同时**看占用率和可用显存。
+
+    ## 事故（2026-11-26 凌晨，本机实测）
+
+    8 张卡 HCU 全是 0%，`free_devices()` 报"8 张都空闲"。但卡 0–3
+    各只剩 4.9–6.9 GB —— 被**容器外**别的租户占着（本容器 `ps` 里只有
+    17 个进程，全是 shell，`hy-smi` 的 VRAM% 却是 90%+）。
+
+    `--parallel-cards` 照着这个列表派活，第一道 mHC 的 M=16384 档
+    （参考实现峰值 4.9 GB）立刻 OOM。而 OOM 在报告里长得像
+    "这个臂的 kernel 有问题"，实际是调度器选错卡 —— 会污染结论。
+
+    所以两条都要卡：忙的不用，**显存不够的也不用**。
+    """
+
+    def _pcts(self, vals):
+        return mock.patch.object(dcu, "_busy_pcts", return_value=vals)
+
+    def test_idle_but_low_vram_excluded(self):
+        # 编号 0/1 空闲但只有 5 GB，2 空闲且 100 GB
+        with self._pcts([0.0, 0.0, 0.0]), \
+             mock.patch.object(dcu, "_free_vram_gb",
+                               return_value={0: 5.0, 1: 5.0, 2: 100.0}):
+            self.assertEqual(dcu.free_devices(), [2])
+
+    def test_busy_high_vram_excluded(self):
+        """显存再多，正在算也不用——抢卡会同时毁掉两边的测量。"""
+        with self._pcts([95.0, 0.0]), \
+             mock.patch.object(dcu, "_free_vram_gb",
+                               return_value={0: 130.0, 1: 50.0}):
+            self.assertEqual(dcu.free_devices(), [1])
+
+    def test_unknown_vram_does_not_exclude(self):
+        """读不到显存时按"未知"放行，否则无 torch 环境一张卡都选不出来。"""
+        with self._pcts([0.0, 0.0]), \
+             mock.patch.object(dcu, "_free_vram_gb", return_value={}):
+            self.assertEqual(dcu.free_devices(), [0, 1])
+
+    def test_threshold_is_respected(self):
+        with self._pcts([0.0]), \
+             mock.patch.object(dcu, "_free_vram_gb", return_value={0: 50.0}):
+            self.assertEqual(dcu.free_devices(min_free_gb=60.0), [])
+            self.assertEqual(dcu.free_devices(min_free_gb=40.0), [0])
+
+    def test_pick_device_prefers_most_vram_not_lowest_index(self):
+        """按编号取会稳定选中别人占剩的那张（卡 0）。"""
+        with self._pcts([0.0, 0.0, 0.0]), \
+             mock.patch.object(dcu, "_free_vram_gb",
+                               return_value={0: 5.5, 1: 6.9, 2: 139.0}), \
+             mock.patch("torch.cuda.set_device"):
+            self.assertEqual(dcu.pick_device(), 2)
+
+    def test_pick_device_returns_none_when_nothing_usable(self):
+        with self._pcts([99.0]), \
+             mock.patch.object(dcu, "_free_vram_gb", return_value={0: 200.0}):
+            self.assertIsNone(dcu.pick_device())
+
+
 class TestBackupParsing(unittest.TestCase):
     def test_reads_perflevel_from_backup(self):
         import tempfile
