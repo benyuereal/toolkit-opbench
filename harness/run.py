@@ -165,19 +165,40 @@ def prepare_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
     if dry_run:
         cwd = os.path.join(RUNS_DIR, f"arm-{arm.upper()}", task_id, "_dry-run")
         os.makedirs(cwd, exist_ok=True)
-        os.chmod(cwd, 0o777)
-        return cwd
+    else:
+        base = os.path.join(RUNS_DIR, f"arm-{arm.upper()}", task_id)
+        os.makedirs(base, exist_ok=True)
+        _n, cwd = _next_attempt(base)
+        os.makedirs(cwd)
 
-    base = os.path.join(RUNS_DIR, f"arm-{arm.upper()}", task_id)
-    os.makedirs(base, exist_ok=True)
-    n, cwd = _next_attempt(base)
-    os.makedirs(cwd)
+    _populate_cwd(cwd)
+    return cwd
+
+
+def _populate_cwd(cwd: str) -> None:
+    """给新建的 cwd 配好权限和子目录。`prepare_cwd` 与 `isolated_cwd` 共用。
+
+    ## 为什么必须共用一个实现
+
+    这两条路径原来各写了一份建目录的代码。补 `scripts/` 的 777 时只改了
+    一份，另一份漏着，结果是 **A 臂（走 isolated_cwd）的 agent 写不进文件**：
+    它让 agent 以 `opb_a` 跑，而 `scripts/` 由 root 按 umask 建成 755。
+    agent 能进 cwd、能 ls，就是 `write scripts/x.py` 报 Permission denied，
+    然后反复换路径重试，把 30 分钟预算烧完，一个文件都没产出
+    （2026-11-26 09:51 实测，三题里两题的 A 臂全空）。
+
+    这种失败在报告里长得像"这个臂不会干活"，实际是我们自己建的目录
+    挡住了它——比测出来的任何 Δ 都更该先修掉。
+
+    `dry_run` 也走这里：预演要暴露的正是这类"跑起来才发现"的问题。
+    """
     os.chmod(cwd, 0o777)
     # 题面要求脚本放 scripts/、原始输出放 results/。
     # Claude 的 Write 不自动建父目录 —— 实测 C 臂写 scripts/x.py 失败后反复查权限跑偏。
     for _sub in ("scripts", "results"):
-        os.makedirs(os.path.join(cwd, _sub), exist_ok=True)
-    return cwd
+        p = os.path.join(cwd, _sub)
+        os.makedirs(p, exist_ok=True)
+        os.chmod(p, 0o777)
 
 
 # A 臂的 cwd 必须搬到仓库之外：cwd 在仓库内时，agent 顺着 `..` 就能
@@ -188,7 +209,13 @@ ISOLATED_ROOT = "/tmp/opbench-run"
 
 
 def _claim_for_arm(arm: str, path: str) -> None:
-    """把 path 及其下两级交给该臂的用户，并设为 700。"""
+    """把 path 及**其下所有层级**交给该臂的用户，并设为 700。
+
+    为什么是"所有层级"而不是固定两级：题目目录的结构是
+    `runs/arm-X/<task>/attempt-N/{scripts,results}`，`scripts/` 在第四级。
+    原来只走两级，`attempt-N/scripts` 就留在了 root 名下、755 权限，
+    agent（以 opb_a 等身份跑）往里面写文件必然 Permission denied。
+    """
     if os.geteuid() != 0:
         return
     user = getattr(_arm_module(arm), "USER", None)
@@ -200,14 +227,9 @@ def _claim_for_arm(arm: str, path: str) -> None:
     except (ImportError, KeyError):
         return
     targets = [path]
-    try:
-        for task in os.listdir(path):
-            tp = os.path.join(path, task)
-            targets.append(tp)
-            for sub in os.listdir(tp):
-                targets.append(os.path.join(tp, sub))
-    except OSError:
-        pass
+    for root, dirs, files in os.walk(path):
+        for name in dirs + files:
+            targets.append(os.path.join(root, name))
     for t in targets:
         try:
             os.chown(t, pw.pw_uid, pw.pw_gid)
@@ -217,23 +239,27 @@ def _claim_for_arm(arm: str, path: str) -> None:
 
 
 def isolated_cwd(task_id: str, arm: str, dry_run: bool = False) -> str:
-    """A 臂用：仓库之外的 cwd。语义与 prepare_cwd 一致（attempt-N、dry-run）。"""
+    """A 臂用：仓库之外的 cwd。语义与 prepare_cwd 一致（attempt-N、dry-run）。
+
+    **不要把建目录的逻辑再抄一遍**：`prepare_cwd` 和本函数曾经各写一份，
+    补 `scripts/` 的 777 时只改了一份，另一份漏着——A 臂（走本函数）的
+    agent 因此写不进文件，白白烧掉一整轮预算（2026-11-26 09:51 实测，
+    三题里两题的 A 臂零产出）。现在两份都调 `_populate_cwd()`。
+    """
     if dry_run:
         cwd = os.path.join(ISOLATED_ROOT, f"arm-{arm.upper()}", task_id, "_dry-run")
         os.makedirs(cwd, exist_ok=True)
-        os.chmod(cwd, 0o777)
-        return cwd
-    base = os.path.join(ISOLATED_ROOT, f"arm-{arm.upper()}", task_id)
-    os.makedirs(base, exist_ok=True)
-    n, cwd = _next_attempt(base)
-    os.makedirs(cwd)
-    os.chmod(cwd, 0o777)
-    # 题面要求脚本放 scripts/、原始输出放 results/。
-    # Claude 的 Write 不自动建父目录 —— 实测 C 臂写 scripts/x.py 失败后反复查权限跑偏。
-    for _sub in ("scripts", "results"):
-        os.makedirs(os.path.join(cwd, _sub), exist_ok=True)
+        _populate_cwd(cwd)
+    else:
+        base = os.path.join(ISOLATED_ROOT, f"arm-{arm.upper()}", task_id)
+        os.makedirs(base, exist_ok=True)
+        _n, cwd = _next_attempt(base)
+        os.makedirs(cwd)
+        _populate_cwd(cwd)
     # 一臂一用户：把 arm-X 整棵树交给该臂用户并 700，别的臂（另一个用户）就进不来。
     # 只换用户不够——三个臂同用 opbench 时，它们仍能互读对方的 cwd（实测 C 读了 arm-A 的 report.md）。
+    #
+    # 放在 _populate_cwd 之后：chown 要覆盖到刚建的 scripts/ 和 results/。
     _claim_for_arm(arm, os.path.join(ISOLATED_ROOT, f"arm-{arm.upper()}"))
     return cwd
 

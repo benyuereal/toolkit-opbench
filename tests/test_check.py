@@ -660,6 +660,49 @@ class TestAnswerIsolation(unittest.TestCase):
         self.assertFalse(p.startswith(run.ROOT))
         self.assertTrue(os.path.isdir(p))
 
+    def test_isolated_cwd_subdirs_exist_and_writable(self):
+        """`scripts/` 和 `results/` 必须建出来，且对**该臂用户**可写。
+
+        ## 事故（2026-11-26 09:51）
+
+        `isolated_cwd` 只管 cwd 本身，`scripts/` 和 `results/` 由
+        `os.makedirs` 按进程 umask 建成 `root:root 755`。A 臂的 agent
+        以 `opb_a` 跑：能进 cwd、能 ls，但 `write scripts/x.py` 报
+        Permission denied —— 它会以为是自己路径写错，反复试到预算耗尽。
+
+        三题并行跑了 9 分钟，mHC 和 conv1d 的 scripts/ 全是空的，
+        而报告里只会显示"没产出"。这种失败看起来像 agent 不会干活，
+        实际是我们建的目录挡住了它，比测出来的任何 Δ 都该先修掉。
+
+        ## 断言为什么不是"权限等于 0o777"
+
+        `_claim_for_arm` 会把 `arm-X` 整棵树 chown 给该臂用户并设 700 ——
+        对属主自己来说 700 就是全权限，比 777 更严也更对（别的臂进不来）。
+        所以要断的是"该用户能写"，而不是某个具体 mode 值。
+        """
+        import tempfile
+
+        from harness import run
+
+        with mock.patch.object(run, "ISOLATED_ROOT", tempfile.mkdtemp()):
+            p = run.isolated_cwd("t1", "A", dry_run=True)
+            for sub in ("scripts", "results"):
+                sp = os.path.join(p, sub)
+                self.assertTrue(os.path.isdir(sp), f"{sub}/ 没建出来")
+                # 目录存在即可写：要么对 everyone 可写（777，未 claim 时），
+                # 要么属主就是运行 agent 的那个用户（claim 之后设的 700）。
+                st = os.stat(sp)
+                world_w = bool(st.st_mode & 0o002)
+                owner = run._arm_module("A").USER
+                import pwd
+                is_arm_owner = st.st_uid == pwd.getpwnam(owner).pw_uid
+                self.assertTrue(
+                    world_w or is_arm_owner,
+                    f"{sub}/ 既不是 777、属主也不是 {owner}"
+                    f"（mode={oct(st.st_mode & 0o777)}, uid={st.st_uid}）"
+                    f" → agent 写不进去",
+                )
+
     def test_guard_refuses_when_readable(self):
         import tempfile
         from harness import run
