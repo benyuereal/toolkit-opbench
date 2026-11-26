@@ -97,8 +97,18 @@ def check_env(env_file: str) -> tuple[list[str], list[str]]:
     return problems, info
 
 
-def check_gpu(threshold: float = 20.0) -> tuple[list[str], list[str], list[int]]:
-    """卡空闲 + 档位一致。返回 (problems, warns, free_cards)。"""
+def check_gpu(threshold: float = 20.0,
+              need: int = 1) -> tuple[list[str], list[str], list[int]]:
+    """卡空闲 + 档位一致。返回 (problems, warns, free_cards)。
+
+    `need` 是**至少要几张卡**。判据是"够不够用"，不是"是不是全都空着"。
+
+    ## 为什么不能"任一卡忙就拦"
+
+    实测（2026-11-26 09:41）：卡 0/3 被占到 67%，卡 4–7 各空 139 GB。
+    三题并行只要 3 张卡，完全跑得起来，但旧判据直接把整轮拦下了。
+    本机 8 张卡里长期只有 4 张可用，**"任一忙即停"等于永远跑不了**。
+    """
     from bench.hw import dcu
 
     problems, warns = [], []
@@ -112,20 +122,39 @@ def check_gpu(threshold: float = 20.0) -> tuple[list[str], list[str], list[int]]
         return ["hy-smi -u 读不到利用率：按全忙处理"], [], []
 
     busy = [i for i, p in enumerate(pcts) if p > threshold]
-    free = [i for i, p in enumerate(pcts) if p <= threshold]
+    # 走 dcu.free_devices() 而不是在这里再写一遍 `p <= threshold`：
+    # 那个判断漏掉显存，实测会把只剩 5 GB 的卡判成空闲（见 dcu 里的说明）。
+    # 两处各写一遍正是这个 bug 出现两次的原因。
+    free = dcu.free_devices(threshold)
+    # 有卡空着但显存不够：这不一定是"别人占着"，可能是别的容器的常驻服务。
+    # 单独说清楚，否则看日志的人会去等一个不会结束的会话。
+    starved = [i for i, p in enumerate(pcts)
+               if p <= threshold and i not in free]
+    if starved:
+        warns.append(
+            f"卡 {starved} 没在算但可用显存 < {dcu.MIN_FREE_VRAM_GB:g} GB，已排除\n"
+            "    多半是容器外租户的常驻服务占着显存。这不是本容器的进程，"
+            "不要 kill，换别的卡"
+        )
     if busy:
         detail = ", ".join(f"卡{i}:{pcts[i]:.0f}%" for i in busy)
-        problems.append(
-            f"有卡占用率 > {threshold}%：{detail}\n"
-            "    本机共享，别抢卡。等别的会话结束"
-        )
-    if not free:
-        problems.append(f"没有空闲卡（利用率 {pcts}）")
+        msg = (f"有卡占用率 > {threshold}%：{detail}（本机共享，不会去抢）\n"
+               f"    可用 {len(free)} 张：{free}，需要 {need} 张")
+        if len(free) < need:
+            problems.append(msg + "\n    空闲卡不够，等别的会话结束")
+        else:
+            warns.append(msg + " → 够用，继续")
+    elif not free:
+        problems.append(f"没有既空闲又够显存的卡（利用率 {pcts}）")
 
-    uniq = sorted(set(levels))
-    if len(uniq) > 1:
+    # 只在**实际要用到的那几张**卡之间比档位：卡 0 是档位 8、卡 4 是档位 1
+    # 是常态（前者被别的会话压到高频，后者刚空下来还没升档），
+    # 拿全机 8 张比会永远报警，而真正要派活的 4 张可能是一致的。
+    uniq_used = sorted({levels[i] for i in free if i < len(levels)})
+    if len(uniq_used) > 1:
+        used = [levels[i] if i < len(levels) else None for i in free]
         warns.append(
-            f"卡时钟档位不一致 {uniq}（各卡 {levels}）。\n"
+            f"可用卡之间时钟档位不一致 {uniq_used}（{free} → {used}）。\n"
             "    同一题的各臂会用同一张卡 → 题内可比；**跨题**耗时不可横比。\n"
             "    修法：先 ramp 到工作档，或只挑同档位的卡"
         )
@@ -203,18 +232,33 @@ def check_budgets(units) -> list[str]:
     return problems
 
 
-def run_all(units, env_file: str, threshold: float = 20.0) -> tuple[Report, list[int]]:
-    """跑全部检查。返回 (报告, 空闲卡)。"""
+def run_all(units, env_file: str, threshold: float = 20.0,
+            parallel: bool = False) -> tuple[Report, list[int]]:
+    """跑全部检查。返回 (报告, 空闲卡)。
+
+    `parallel=True` 时至少要"一道题一张卡"（`dispatch_by_card` 的并行度
+    是 min(题数, 卡数)）；串行只要一张。
+    """
     rep = Report()
     arms = sorted({u.arm for u in units})
+    n_tasks = len({u.task for u in units})
+    need = min(n_tasks, 8) if parallel else 1
 
     p, info = check_env(env_file)
     rep.problems.extend(p)
     rep.info.extend(info)
 
-    p, w, free = check_gpu(threshold)
+    p, w, free = check_gpu(threshold, need=need)
     rep.problems.extend(p)
     rep.warns.extend(w)
+    # 按可用显存从多到少排，让 --parallel-cards 先吃掉最宽裕的几张。
+    # 不排的话会按编号从小到大派，稳定选中卡 0——而卡 0 常是别人占剩的那张。
+    try:
+        from bench.hw import dcu as _dcu
+        _mem = _dcu._free_vram_gb(max(free) + 1) if free else {}
+        free = sorted(free, key=lambda i: (-_mem.get(i, -1.0), i))
+    except Exception:
+        pass
 
     p, w = check_isolation(arms)
     rep.problems.extend(p)

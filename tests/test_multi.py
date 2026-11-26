@@ -111,7 +111,87 @@ class TestIsolation(unittest.TestCase):
                 self.assertTrue(r["world_readable"])
 
 
-class TestPreflight(unittest.TestCase):
+class TestPreflightGpuSufficiency(unittest.TestCase):
+    """显存/占用判据：够用就放行，不够才拦。
+
+    ## 事故（2026-11-26 09:41）
+
+    卡 0/3 被占到 67%，卡 4–7 各空 139 GB。三题并行只要 3 张，完全跑得
+    起来，但旧判据"任一卡忙就拦"把整轮挡下了。本机 8 张里长期只有 4 张
+    可用，这条判据等于永远跑不了——比不检查还糟，因为它看起来像在工作。
+    """
+
+    def _patch(self, pcts, vram, levels=None):
+        from unittest import mock
+
+        from bench.hw import dcu
+
+        lv = levels or [(8, 1300)] * len(pcts)
+        return (
+            mock.patch.object(dcu, "_busy_pcts", return_value=pcts),
+            mock.patch.object(dcu, "_free_vram_gb", return_value=vram),
+            mock.patch.object(dcu, "_sclk_levels", return_value=lv),
+        )
+
+    def test_enough_free_cards_passes_despite_busy_ones(self):
+        from harness.multi import preflight
+
+        p1, p2, p3 = self._patch(
+            [67.0, 5.0, 14.0, 67.0, 0.0, 0.0, 0.0, 0.0],
+            {0: 5.0, 1: 6.9, 2: 6.9, 3: 6.4,
+             4: 139.0, 5: 139.0, 6: 139.0, 7: 139.0},
+        )
+        with p1, p2, p3:
+            problems, warns, free = preflight.check_gpu(need=3)
+        self.assertEqual(problems, [], f"有 4 张可用却报错：{problems}")
+        self.assertEqual(free, [4, 5, 6, 7])
+        self.assertTrue(any("够用" in w for w in warns), warns)
+
+    def test_not_enough_free_cards_blocked(self):
+        from harness.multi import preflight
+
+        p1, p2, p3 = self._patch(
+            [0.0, 67.0, 67.0, 67.0, 0.0, 0.0, 0.0, 0.0],
+            {0: 139.0, 1: 5.0, 2: 5.0, 3: 5.0,
+             4: 5.0, 5: 5.0, 6: 5.0, 7: 5.0},
+        )
+        with p1, p2, p3:
+            problems, _w, free = preflight.check_gpu(need=3)
+        self.assertTrue(problems, "只有 1 张可用却要 3 张，应当拦下")
+        self.assertEqual(free, [0])
+
+    def test_serial_needs_only_one(self):
+        from harness.multi import preflight
+
+        p1, p2, p3 = self._patch(
+            [0.0] * 4 + [99.0] * 4,
+            {0: 139.0, 1: 139.0, 2: 139.0, 3: 139.0,
+             4: 139.0, 5: 139.0, 6: 139.0, 7: 139.0},
+        )
+        with p1, p2, p3:
+            problems, _w, free = preflight.check_gpu(need=1)
+        self.assertEqual(problems, [])
+        self.assertEqual(len(free), 4)
+
+    def test_clock_warning_only_among_usable_cards(self):
+        """卡 0 是档位 8、卡 4 是档位 1 是常态，不能因此永久报警。"""
+        from harness.multi import preflight
+
+        levels = [(8, 1300), (8, 1300), (8, 1300), (8, 1300),
+                  (1, 600), (1, 600), (1, 600), (1, 600)]
+        p1, p2, p3 = self._patch(
+            [99.0] * 4 + [0.0] * 4,
+            {i: (5.0 if i < 4 else 139.0) for i in range(8)},
+            levels=levels,
+        )
+        with p1, p2, p3:
+            _p, warns, free = preflight.check_gpu(need=3)
+        self.assertEqual(free, [4, 5, 6, 7])
+        self.assertFalse(
+            [w for w in warns if "档位不一致" in w],
+            f"可用的 4 张档位一致（都是 1），不该报警：{warns}",
+        )
+
     def test_budget_below_stated_is_blocked(self):
         """压预算必须被拦。历史事故：--budget 120 对 1800s 的题，产出全是 timeout。"""
         from harness.multi import preflight

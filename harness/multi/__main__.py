@@ -72,8 +72,10 @@ def main(argv=None) -> int:
     p.add_argument("--max-usd", type=float, default=None,
                    help="默认不设。设了会在题面时间预算之前切断")
     p.add_argument("--env", default=os.environ.get("OPBENCH_ENV", DEFAULT_ENV))
-    p.add_argument("--card", type=int, default=None,
-                   help="绑卡。默认第一张空闲卡；同题各臂共用")
+    p.add_argument("--card", type=int, nargs="+", default=None,
+                   help="绑卡，可给多张（如 --card 4 5 6）。"
+                        "串行时只用第一张；--parallel-cards 时按顺序分给各题。"
+                        "默认自动挑空闲卡")
     p.add_argument("--parallel-cards", action="store_true",
                    help="题间并行（不同题不同卡），题内仍串行")
     p.add_argument("--threshold", type=float, default=20.0)
@@ -144,7 +146,8 @@ def main(argv=None) -> int:
 
     from harness.multi import preflight
 
-    rep, free = preflight.run_all(units, a.env, a.threshold)
+    rep, free = preflight.run_all(units, a.env, a.threshold,
+                                  parallel=a.parallel_cards)
     if rep.render():
         print(rep.render())
     if not rep.ok:
@@ -164,11 +167,11 @@ def main(argv=None) -> int:
     print("下发")
     print("=" * 74)
     if a.parallel_cards:
-        cards = [a.card] if a.card is not None else free
+        cards = a.card if a.card is not None else free
         print(f"题间并行，卡 {cards[:len(tasks)]}")
         dispatch.dispatch_by_card(units, cards, max_usd=a.max_usd)
     else:
-        card = a.card if a.card is not None else (free[0] if free else None)
+        card = a.card[0] if a.card is not None else (free[0] if free else None)
         if card is None:
             print("没有可用卡", file=sys.stderr)
             return 2
