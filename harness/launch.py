@@ -302,7 +302,7 @@ def guard_answer_readable(task_id: str, arm: str) -> None:
             "能读到答案的臂不能当基线。修法（任一）："
             f"chmod 600 {os.path.relpath(task_dir(task_id), ROOT)}/expect.md "
             f"与 definition.json；或让 {arm} 臂在仓库外的 cwd 里跑"
-            "（见 harness.run.isolated_cwd）"
+            "（见 harness.launch.isolated_cwd）"
         )
 
 
@@ -550,7 +550,15 @@ def assert_arms_comparable(task_id: str, budget_s: int, max_usd: float | None) -
 
 
 def run_one(task_id: str, arm: str, budget_s: int,
-            max_usd: float | None = DEFAULT_MAX_USD, dry_run: bool = False) -> dict:
+            max_usd: float | None = DEFAULT_MAX_USD, dry_run: bool = False,
+            device: int | None = None) -> dict:
+    """跑一题一臂。
+
+    `device` 是要绑的卡号。**必须显式传，不要靠 `OPBENCH_DEVICE` 环境变量**：
+    多题并行时每个题一个线程，而 `os.environ` 是进程级共享的——A 线程刚写
+    "5"、B 线程下一行改成 "4"，子进程绑哪张卡全看调度时序，且不会报错。
+    实测（2026-11-26 10:05）三题并行，卡 5/6 上的题完全没产出。
+    """
     arm = arm.upper()
     td = task_dir(task_id)
     defn = load_definition(td)
@@ -639,7 +647,8 @@ def run_one(task_id: str, arm: str, budget_s: int,
         return record
 
     # ---- GPU 段：持锁 + 空闲检查 + ramp（只有需要 GPU 的题）----
-    pinned = os.environ.get("OPBENCH_DEVICE", "")  # 单卡绑定时由调度器设
+    # 优先用调用方传进来的 device；没有才回退到环境变量（单进程串行时用）。
+    pinned = str(device) if device is not None else os.environ.get("OPBENCH_DEVICE", "")
     if record["needs_gpu"]:
         from bench.hw import dcu
 
@@ -663,7 +672,8 @@ def run_one(task_id: str, arm: str, budget_s: int,
                 record["gpu_visible_env"] = os.environ.get("CUDA_VISIBLE_DEVICES")
                 record["sclk_mhz"] = dcu.ramp_to_work_clock()
                 record["status"], record["exit_code"], record["wall_time_s"] = _execute(
-                    cwd, prompt, arm, budget_s, max_usd, record, plugin_dir=plugin_dir,
+                    cwd, prompt, arm, budget_s, max_usd, record,
+                    plugin_dir=plugin_dir, device=device,
                 )
         else:
             # 串行模式：等锁 + 挑空闲卡（原逻辑）
@@ -685,13 +695,13 @@ def run_one(task_id: str, arm: str, budget_s: int,
                 record["sclk_mhz"] = dcu.ramp_to_work_clock()
                 record["status"], record["exit_code"], record["wall_time_s"] = _execute(
                     cwd, prompt, arm, budget_s, max_usd, record,
-                    plugin_dir=plugin_dir,
+                    plugin_dir=plugin_dir, device=device,
                 )
             record["sclk_end_mhz"] = dcu.current_sclk()
     else:
         record["status"], record["exit_code"], record["wall_time_s"] = _execute(
             cwd, prompt, arm, budget_s, max_usd, record,
-            plugin_dir=plugin_dir,
+            plugin_dir=plugin_dir, device=device,
         )
 
     record["artifacts"] = _collect_artifacts(cwd)
@@ -708,7 +718,8 @@ def _sha(text: str) -> str:
 
 def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
              max_usd: float, record: dict,
-             plugin_dir: str | None = None) -> tuple[str, int | None, float]:
+             plugin_dir: str | None = None,
+             device: int | None = None) -> tuple[str, int | None, float]:
     """跑 claude，**没做完就续跑**，直到有交付物或预算耗尽。
 
     返回 (status, exit_code, wall_time_s)。
@@ -766,7 +777,8 @@ def _execute(cwd: str, prompt: str, arm: str, budget_s: int,
             this_prompt = prompt
 
         status, rc, wall, session_id = _execute_once(
-            cwd, this_prompt, arm, int(remain), max_usd, record, cmd)
+            cwd, this_prompt, arm, int(remain), max_usd, record, cmd,
+            device=device)
         total_wall += wall
         last_status, last_rc = status, rc
         record["resume_rounds"] = round_no + 1
@@ -819,16 +831,21 @@ def _deliverable_sig(cwd: str) -> tuple:
 
 def _execute_once(cwd: str, prompt: str, arm: str, budget_s: int,
                   max_usd: float, record: dict,
-                  cmd: list[str]) -> tuple[str, int | None, float, str | None]:
+                  cmd: list[str],
+                  device: int | None = None,
+                  ) -> tuple[str, int | None, float, str | None]:
     """跑一次 claude。返回 (status, exit_code, wall_time_s, session_id)。
 
     status ∈ ok / timeout / budget / error
+
+    `device` 优先于 `OPBENCH_DEVICE` 环境变量：多题并行时后者是进程级
+    共享的，会被别的线程覆盖（见 `run_one` 的说明）。
     """
     env = os.environ.copy()
     env.update(_load_env())
     # 绑卡并行：把卡号写进子进程环境。DCU 上 torch 认 HIP_VISIBLE_DEVICES，
     # 同时设 CUDA_VISIBLE_DEVICES 兼容老代码/第三方库。
-    _dev = os.environ.get("OPBENCH_DEVICE", "")
+    _dev = str(device) if device is not None else os.environ.get("OPBENCH_DEVICE", "")
     if _dev:
         env["HIP_VISIBLE_DEVICES"] = _dev
         env["CUDA_VISIBLE_DEVICES"] = _dev

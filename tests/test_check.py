@@ -208,27 +208,27 @@ class TestRunHelpers(unittest.TestCase):
     """执行器的纯逻辑部分：预算解析、任务目录解析、题目 id 归一。"""
 
     def test_stated_budget_parsed(self):
-        from harness import run
+        from harness import launch as run
 
         self.assertEqual(run.stated_budget_s("## 约束\n\n- 时间预算：**30 分钟**\n"), 1800)
         self.assertEqual(run.stated_budget_s("时间预算: 10 分钟"), 600)
         self.assertIsNone(run.stated_budget_s("没有写预算"))
 
     def test_task_dir_by_dirname_and_by_id(self):
-        from harness import run
+        from harness import launch as run
 
         a = run.task_dir("l5-asm-fmoe-a8")     # 目录名
         b = run.task_dir("moe-asm-fmoe-l5")    # definition.id
         self.assertEqual(a, b)
 
     def test_task_dir_unknown(self):
-        from harness import run
+        from harness import launch as run
 
         with self.assertRaises(FileNotFoundError):
             run.task_dir("no-such-task-xyz")
 
     def test_budget_below_stated_is_refused(self):
-        from harness import run
+        from harness import launch as run
 
         with self.assertRaises(ValueError) as ctx:
             run.run_one("moe-asm-fmoe-l5", "B", 60)
@@ -237,7 +237,7 @@ class TestRunHelpers(unittest.TestCase):
     def test_suite_expands_using_definition_id(self):
         """suite 里写目录名，队列里也必须归一成 definition.id。"""
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("name: t\ntasks:\n  - id: l5-asm-fmoe-a8\n    budget: 600\n")
@@ -455,7 +455,7 @@ class TestClaudeMdNeutrality(unittest.TestCase):
         """
         import inspect
 
-        from harness import run
+        from harness import launch as run
 
         src = inspect.getsource(run)
         self.assertNotIn("invalid:no_loop_evidence", src)
@@ -473,7 +473,7 @@ class TestArmBudgetComparability(unittest.TestCase):
     def test_mismatched_usd_refused(self):
         import json as _json
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         runs = tempfile.mkdtemp()
         d = os.path.join(runs, "arm-A", "t9", "attempt-1")
@@ -496,7 +496,7 @@ class TestArmBudgetComparability(unittest.TestCase):
         """缺 _stdout.jsonl 无法判定 → 必须报出来，不能静默放行。"""
         import json as _json
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         runs = tempfile.mkdtemp()
         d = os.path.join(runs, "arm-A", "t9", "attempt-1")
@@ -513,7 +513,7 @@ class TestArmBudgetComparability(unittest.TestCase):
         """被预算切断的臂允许换美元上限重跑（否则永远修不好那个样本）。"""
         import json as _json
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         runs = tempfile.mkdtemp()
         d = os.path.join(runs, "arm-C", "t9", "attempt-1")
@@ -532,7 +532,7 @@ class TestArmBudgetComparability(unittest.TestCase):
     def test_mismatched_wall_budget_refused(self):
         import json as _json
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         runs = tempfile.mkdtemp()
         d = os.path.join(runs, "arm-B", "t9", "attempt-1")
@@ -545,7 +545,7 @@ class TestArmBudgetComparability(unittest.TestCase):
 
     def test_no_previous_runs_is_fine(self):
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         with mock.patch.object(run, "RUNS_DIR", tempfile.mkdtemp()):
             self.assertEqual(run.assert_arms_comparable("none", 1800, 3.0), [])
@@ -653,7 +653,7 @@ class TestAnswerIsolation(unittest.TestCase):
 
     def test_isolated_cwd_outside_repo(self):
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         with mock.patch.object(run, "ISOLATED_ROOT", tempfile.mkdtemp()):
             p = run.isolated_cwd("t1", "A", dry_run=True)
@@ -682,7 +682,7 @@ class TestAnswerIsolation(unittest.TestCase):
         """
         import tempfile
 
-        from harness import run
+        from harness import launch as run
 
         with mock.patch.object(run, "ISOLATED_ROOT", tempfile.mkdtemp()):
             p = run.isolated_cwd("t1", "A", dry_run=True)
@@ -705,7 +705,7 @@ class TestAnswerIsolation(unittest.TestCase):
 
     def test_guard_refuses_when_readable(self):
         import tempfile
-        from harness import run
+        from harness import launch as run
 
         d = tempfile.mkdtemp()
         with open(os.path.join(d, "expect.md"), "w", encoding="utf-8") as f:
@@ -724,7 +724,7 @@ class TestAnswerIsolation(unittest.TestCase):
                 run.guard_answer_readable("t1", "A")
 
     def test_guard_skips_non_isolated_arm(self):
-        from harness import run
+        from harness import launch as run
 
         run.guard_answer_readable("moe-asm-fmoe-l5", "C")  # 不应抛
 
@@ -734,7 +734,7 @@ class TestL5SuiteReadiness(unittest.TestCase):
 
     def test_all_l5_tasks_present(self):
         import yaml
-        from harness import run
+        from harness import launch as run
 
         suite = yaml.safe_load(open("suites/l5-only.yaml", encoding="utf-8"))
         for spec in suite["tasks"]:
@@ -755,7 +755,7 @@ class TestL5SuiteReadiness(unittest.TestCase):
             self.assertEqual(leak.scan_answer_leak(text), [], f"{task} 题面泄答案")
 
     def test_needs_gpu_annotated(self):
-        from harness import run
+        from harness import launch as run
 
         wants = {"gemm-fp8-l5": True, "moe-shared-expert-l5": True,
                  "attn-gqa-repeat-kv-l5": False, "lin-hadamard-l5": False,
@@ -767,7 +767,7 @@ class TestL5SuiteReadiness(unittest.TestCase):
 
     def test_l5_is_not_uniformly_cpu(self):
         """L5 不是一刀切不需要 GPU：有一半要实测。"""
-        from harness import run
+        from harness import launch as run
 
         needs = [run.needs_gpu(run.load_definition(run.task_dir(t)))
                  for t in ("gemm-fp8-l5", "lin-hadamard-l5")]

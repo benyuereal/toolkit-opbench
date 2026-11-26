@@ -6,9 +6,9 @@
 
 - 有效流量：M=4096 时读 `M×E×4` = 1 MB，写 `M×TOPK×(4+4)` ≈ 0.26 MB，合计约 1.3 MB
   （按 definition 的 `work` 表达式算约 2.5 MB，含索引的对齐开销）
-- 在 `peak_achievable:read` = 1724 GB/s 下，理论 T_sol ≈ **1.4 µs**
+- 在 `peak_achievable:read` = 1870 GB/s 下，理论 T_sol ≈ **1.9 µs**
 - 本机单次 kernel launch 的固定代价实测 **43 µs**（constants 的 `launch.floor_us`）
-- **1.4 µs / 43 µs ≈ 0.03** —— 也就是说即使 kernel 内部零开销，
+- **1.9 µs / 43 µs ≈ 0.04** —— 也就是说即使 kernel 内部零开销，
   实测也只会贴着 43 µs。任何"达成率"在这个尺度上都没有意义。
 
 正确落点：`aiter.moe_c_topk_softmax`（四参数 schema，

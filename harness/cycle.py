@@ -37,7 +37,7 @@ def _step(msg: str) -> None:
 
 
 def _needs_gpu(task_id: str) -> bool:
-    from harness.run import load_definition, needs_gpu, task_dir
+    from harness.launch import load_definition, needs_gpu, task_dir
 
     return needs_gpu(load_definition(task_dir(task_id)))
 
@@ -65,7 +65,7 @@ def ensure_baseline(task_id: str, iters: int = 30) -> dict:
 
 
 def run_arms(task_id: str, budget: int, max_usd: float) -> list[dict]:
-    from harness.run import run_one
+    from harness.launch import run_one
 
     out = []
     for arm in ARMS:
@@ -103,7 +103,7 @@ def main(argv=None) -> int:
     global ARMS
     ARMS = tuple(x.strip().upper() for x in a.arms.split(",") if x.strip())
 
-    from harness.run import load_definition, stated_budget_s, task_dir
+    from harness.launch import load_definition, stated_budget_s, task_dir
 
     summary = {}
     for task_id in a.tasks:

@@ -13,7 +13,7 @@ for t in mla-sparse-l1 norm-fused-add-rmsnorm-l1 moe-gating-l1; do
   D=$(stdpath "$t")
   if [ -f "$D/results/bench_std.json" ]; then say "[skip] $t 已有 bench_std"; continue; fi
   say "===== [$(date +%H:%M:%S)] RUN $t (dev=$DEV) ====="
-  python3 -u -m harness.run --task "$t" --arm "$ARM" --budget 1800 --max-usd 5.0 >> "$LOG" 2>&1
+  python3 -u -m harness.launch --task "$t" --arm "$ARM" --budget 1800 --max-usd 5.0 >> "$LOG" 2>&1
   if [ -f "$D/results/bench_std.json" ]; then say "[OK] $t $(date +%H:%M:%S)"
   else say "[MISS] $t $(date +%H:%M:%S)"; fi
 done

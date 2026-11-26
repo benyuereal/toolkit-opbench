@@ -344,7 +344,7 @@ def run(task_id: str, arms: list[str], shape_index: int = 0,
     from bench.data import definition as defn_mod
     from bench.data import workload as wl_mod
     from harness.measure import resolve_spec
-    from harness.run import task_dir
+    from harness.launch import task_dir
 
     td = task_dir(task_id)
     defn = defn_mod.load(os.path.join(td, "definition.json"))
@@ -588,7 +588,7 @@ def _worker_main(cfg_path: str) -> int:
     from bench.data import definition as defn_mod
     from bench.data import workload as wl_mod
     from harness.measure import resolve_spec
-    from harness.run import task_dir
+    from harness.launch import task_dir
 
     task_id = cfg["task"]
     td = task_dir(task_id)

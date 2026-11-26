@@ -111,6 +111,70 @@ class TestIsolation(unittest.TestCase):
                 self.assertTrue(r["world_readable"])
 
 
+class TestDispatchCardNotViaEnv(unittest.TestCase):
+    """卡号必须显式传参，不能靠进程级环境变量。
+
+    ## 事故（2026-11-26 10:05）
+
+    三题并行，卡 5/6 上的题完全没产出。`dispatch_by_card` 当时是这么做的：
+
+        os.environ["OPBENCH_DEVICE"] = str(card)
+        dispatch_one(unit)          # 里面 run_one() 读 os.environ
+
+    `os.environ` 是**进程级**的。三个线程各改各的：卡 5 的线程刚写 "5"，
+    卡 4 的线程下一行就改成 "4"。子进程绑哪张卡全看调度时序，而且
+    不抛异常——只会表现为"某张卡上的题没产出"，看起来像 agent 不干活。
+    """
+
+    def test_dispatch_one_passes_card_explicitly(self):
+        from unittest import mock
+
+        from harness.multi import dispatch
+
+        unit = mock.Mock(task="t1", arm="A", budget_s=60)
+        with mock.patch("harness.launch.run_one",
+                        return_value={"status": "ok", "wall_time_s": 1.0}) as m:
+            dispatch.dispatch_one(unit, card=5)
+        self.assertTrue(m.called)
+        self.assertEqual(m.call_args.kwargs.get("device"), 5,
+                         "卡号没有作为 device 传下去，仍在走环境变量")
+
+    def test_dispatch_one_without_card_keeps_env_fallback(self):
+        """不给 card 时传 None，由 run_one 自己回退到环境变量。"""
+        from unittest import mock
+
+        from harness.multi import dispatch
+
+        unit = mock.Mock(task="t1", arm="A", budget_s=60)
+        with mock.patch("harness.launch.run_one",
+                        return_value={"status": "ok", "wall_time_s": 1.0}) as m:
+            dispatch.dispatch_one(unit)
+        self.assertIsNone(m.call_args.kwargs.get("device"))
+
+    def test_worker_survives_one_failing_unit(self):
+        """一道题抛异常不能让整张卡的线程静默退场。"""
+        from unittest import mock
+
+        from harness.multi import dispatch
+
+        u1 = mock.Mock(task="a", arm="A", budget_s=1)
+        u2 = mock.Mock(task="b", arm="A", budget_s=1)
+        u1.status = "pending"; u2.status = "pending"
+        calls = {"n": 0}
+
+        def fake_run_one(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return {"status": "ok", "wall_time_s": 1.0}
+
+        with mock.patch("harness.launch.run_one", side_effect=fake_run_one):
+            dispatch.dispatch_by_card([u1, u2], [0])
+
+        self.assertEqual(calls["n"], 2, "第一道题炸了之后第二道没跑")
+        self.assertIn("RuntimeError", str(u1.status) + str(getattr(u1, "error", "")))
+
+
 class TestPreflightGpuSufficiency(unittest.TestCase):
     """显存/占用判据：够用就放行，不够才拦。
 
@@ -218,7 +282,7 @@ class TestPreflightGpuSufficiency(unittest.TestCase):
         这里会变成 problem。
         """
         from harness.multi import preflight
-        from harness.run import _load_env
+        from harness.launch import _load_env
 
         with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
             f.write("ANTHROPIC_AUTH_TOKEN=sk-test\n")
@@ -338,7 +402,7 @@ class TestResumeLogic(unittest.TestCase):
     """
 
     def test_has_deliverable_requires_real_file(self):
-        from harness.run import _has_deliverable
+        from harness.launch import _has_deliverable
 
         with tempfile.TemporaryDirectory() as td:
             self.assertFalse(_has_deliverable(td), "空目录不该算有交付物")
@@ -349,7 +413,7 @@ class TestResumeLogic(unittest.TestCase):
             self.assertTrue(_has_deliverable(td))
 
     def test_report_md_alone_counts(self):
-        from harness.run import _has_deliverable
+        from harness.launch import _has_deliverable
 
         with tempfile.TemporaryDirectory() as td:
             with open(os.path.join(td, "report.md"), "w") as f:
@@ -360,7 +424,7 @@ class TestResumeLogic(unittest.TestCase):
         """续跑靠指纹判断"这轮有没有新东西"，指纹必须对写入敏感。"""
         import time as _t
 
-        from harness.run import _deliverable_sig
+        from harness.launch import _deliverable_sig
 
         with tempfile.TemporaryDirectory() as td:
             s0 = _deliverable_sig(td)
@@ -371,26 +435,26 @@ class TestResumeLogic(unittest.TestCase):
             self.assertNotEqual(s0, s1, "写了文件指纹没变，会误判成卡住")
 
     def test_build_cmd_passes_resume(self):
-        from harness.run import build_cmd
+        from harness.launch import build_cmd
 
         cmd = build_cmd("/tmp/x", 100, None, resume="abc-123")
         self.assertIn("--resume", cmd)
         self.assertEqual(cmd[cmd.index("--resume") + 1], "abc-123")
 
     def test_build_cmd_no_resume_by_default(self):
-        from harness.run import build_cmd
+        from harness.launch import build_cmd
 
         self.assertNotIn("--resume", build_cmd("/tmp/x", 100, None))
 
     def test_continue_prompt_demands_artifacts(self):
         """续跑提示必须点名交付物，否则模型会继续说下一句计划。"""
-        from harness.run import CONTINUE_PROMPT
+        from harness.launch import CONTINUE_PROMPT
 
         self.assertIn("bench_std.json", CONTINUE_PROMPT)
         self.assertIn("report.md", CONTINUE_PROMPT)
 
     def test_resume_limits_sane(self):
-        from harness.run import MAX_IDLE_RESUMES, MAX_RESUMES
+        from harness.launch import MAX_IDLE_RESUMES, MAX_RESUMES
 
         self.assertGreater(MAX_RESUMES, 0)
         self.assertLess(MAX_IDLE_RESUMES, MAX_RESUMES)

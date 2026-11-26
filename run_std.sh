@@ -13,7 +13,7 @@ run(){
   t=$1; a=$2; b=$3
   if has_std "$t" "$a"; then say "[skip] $t/$a (bench_std 已有)"; return; fi
   say "===== [$(date +%H:%M:%S)] RUN $t/$a (${b}s) ====="
-  python3 -u -m harness.run --task "$t" --arm "$a" --budget "$b" --max-usd $MAXUSD >> "$LOG" 2>&1
+  python3 -u -m harness.launch --task "$t" --arm "$a" --budget "$b" --max-usd $MAXUSD >> "$LOG" 2>&1
   rc=$?
   if has_std "$t" "$a"; then say "[rc=$rc][OK bench_std] $t/$a $(date +%H:%M:%S)"
   else say "[rc=$rc][MISS bench_std] $t/$a $(date +%H:%M:%S)"; fi

@@ -95,7 +95,7 @@ def main(argv=None) -> int:
 
     # 同步改模块全局，否则本进程里的 _load_env() 会读旧的默认路径
     # （子进程靠继承 os.environ 没问题，但 preflight 是在本进程里查的）。
-    from harness.run import set_env_file
+    from harness.launch import set_env_file
     set_env_file(os.path.abspath(a.env))
     arms = [x.strip().upper() for x in a.arms.split(",") if x.strip()]
 

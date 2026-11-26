@@ -12,7 +12,7 @@ for t in mla-sparse-l1 norm-fused-add-rmsnorm-l1 moe-gating-l1; do
   fi
   echo "[fix][run] $t/A $(date +%H:%M:%S)" >> "$LOG"
   rm -rf /tmp/opbench-run/arm-A/$t/attempt-*
-  python3 -u -m harness.run --task "$t" --arm A --budget 1800 --max-usd 5.0 >> "$LOG" 2>&1
+  python3 -u -m harness.launch --task "$t" --arm A --budget 1800 --max-usd 5.0 >> "$LOG" 2>&1
   if [ -f "$d/results/bench_std.json" ]; then
     echo "[fix][OK] $t/A $(date +%H:%M:%S)" >> "$LOG"
   else

@@ -1,14 +1,14 @@
 {
   "task": "mla-sparse-l1",
   "t_b_ms": 0.36653034084988323,
-  "t_sol_ms": 0.16222244478371503,
+  "t_sol_ms": 0.17046369197860964,
   "sclk_seen_mhz": [
     1200
   ],
   "sclk_note": "auto DPM 在 1200/1350 间跳变；实测 275–286 TF 与 constants 的 279 TF@1350 一致。**不要用 sclk 做频率折算**——单次读数会落到空闲档，折算出的达成率会虚高 10–100%。",
   "baseline_impl": "flash_mla.flash_mla_sparse_fwd",
   "peak_id": "peak_achievable:read",
-  "peak_value": 1965.0,
+  "peak_value": 1870.0,
   "peak_kind": "peak_achievable",
   "peak_status": "measured",
   "work": "S*TOPK*D*2 + S*H*512*2",
@@ -61,5 +61,6 @@
     "triton": "3.6.0+dtk2604.torch2110.2609091754.g52ce09",
     "DTK": "DTK-26.04-rc4",
     "DTK_path": "/opt/dtk"
-  }
+  },
+  "t_sol_note": "t_sol 按 peak 变化从 0.162222 重算（1965.0->1870，即纯读上限修正，2026-11-26）；t_b 未变"
 }

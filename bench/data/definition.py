@@ -1,7 +1,7 @@
 """definition.json 的 schema 与校验。
 
 一个题目的"固定部分"：符号轴、张量规格、容差、参考实现入口。
-不负责：形状展开（workload.py）、执行（harness/run.py）。
+不负责：形状展开（workload.py）、执行（harness/launch.py）。
 
 校验为什么要严格到"未知字段也报错"：题面是评分器的唯一输入，
 一个字段名打错（tolerance -> tolerence）不会让加载失败，只会让容差

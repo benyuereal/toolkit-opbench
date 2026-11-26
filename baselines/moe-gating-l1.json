@@ -1,14 +1,14 @@
 {
   "task": "moe-gating-l1",
   "t_b_ms": 0.08201713017965553,
-  "t_sol_ms": 0.002042872506322483,
+  "t_sol_ms": 0.0018833755085026528,
   "sclk_seen_mhz": [
     1200
   ],
   "sclk_note": "auto DPM 在 1200/1350 间跳变；实测 275–286 TF 与 constants 的 279 TF@1350 一致。**不要用 sclk 做频率折算**——单次读数会落到空闲档，折算出的达成率会虚高 10–100%。",
   "baseline_impl": "harness.implementations.aiter_topk_softmax",
   "peak_id": "peak_achievable:read",
-  "peak_value": 1724.0,
+  "peak_value": 1870.0,
   "peak_kind": "peak_achievable",
   "peak_status": "measured",
   "work": "2*M*E*4 + 2*M*TOPK*6",
@@ -53,5 +53,6 @@
     "triton": "3.6.0+dtk2604.torch2110.2609091754.g52ce09",
     "DTK": "DTK-26.04-rc4",
     "DTK_path": "/opt/dtk"
-  }
+  },
+  "t_sol_note": "peak 从作废的 1724 修正为 1870（2026-11-26）；t_sol 0.002043->0.001883，t_b 未变"
 }

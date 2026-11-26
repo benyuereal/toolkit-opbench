@@ -13,7 +13,7 @@ run(){
   t=$1; a=$2; b=$3
   if has_attempt "$t" "$a"; then say "[skip] $t/$a"; return; fi
   say "===== [$(date +%H:%M:%S)] RUN $t/$a (${b}s) ====="
-  python3 -u -m harness.run --task "$t" --arm "$a" --budget "$b" --max-usd $MAXUSD >> "$LOG" 2>&1
+  python3 -u -m harness.launch --task "$t" --arm "$a" --budget "$b" --max-usd $MAXUSD >> "$LOG" 2>&1
   say "[rc=$?] $t/$a $(date +%H:%M:%S)"
 }
 # L1：只缺 moe-gating-l1/C，先跑，齐了就能出完整 L1 对比

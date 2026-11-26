@@ -18,7 +18,7 @@ class TestEnvRStrip(unittest.TestCase):
     """ANTHROPIC_BASE_URL 尾斜杠必须被去掉，否则 404。"""
 
     def _load_from(self, content: str):
-        import harness.run as run
+        import harness.launch as run
         with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
             f.write(content)
             path = f.name

@@ -98,6 +98,11 @@ kernel 的调用顺序 `(x, residual, post, comb, o, ...)` 抄会静默写错位
 自研 HIP 实现记录到 **1456–1827 GB/s**（`/workspace/mhc_kernels/RESULTS.md`，
 那份文档用的分母是 1870 GB/s 流式读上限，不是这里的 copy 1350）。
 
+**三个峰值别混**：纯读 1870 / copy(1:1) 1350 / 标称 1100。本题读写各半，
+分子是 9H，分母该用 copy；用 1870 当分母会把达成率压低约 28%，用 1100
+会抬高约 23%。`constants.yaml` 的 `measured_bandwidth.by_mode_gbs` 里
+四档并列，就是防止拿一个数套所有算子。
+
 ## 合格答案
 
 ### ① 最好：认出 residual 的复用关系，给出 9H 的下界

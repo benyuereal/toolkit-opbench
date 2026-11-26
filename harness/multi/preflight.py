@@ -49,7 +49,7 @@ class Report:
 
 def check_env(env_file: str) -> tuple[list[str], list[str]]:
     """env 文件、凭据、URL 尾斜杠。返回 (problems, info)。"""
-    from harness.run import _load_env, set_env_file
+    from harness.launch import _load_env, set_env_file
 
     problems, info = [], []
     if not os.path.isfile(env_file):
@@ -210,7 +210,7 @@ def check_residue() -> list[str]:
 
 def check_budgets(units) -> list[str]:
     """单元预算不能低于题面写的时间；`--max-usd` 与时间预算不能打架。"""
-    from harness.run import stated_budget_s, task_dir
+    from harness.launch import stated_budget_s, task_dir
 
     problems = []
     seen = set()

@@ -65,7 +65,7 @@ def _run_task_on_card(task: str, arms, budget: int, max_usd: float, card: int):
         for arm in arms:
             print(f"    {task} / {arm} (卡{card})", flush=True)
             subprocess.call(
-                [sys.executable, "-m", "harness.run", "--task", task, "--arm", arm,
+                [sys.executable, "-m", "harness.launch", "--task", task, "--arm", arm,
                  "--budget", str(budget), "--max-usd", str(max_usd)],
                 cwd=ROOT, env=env, stdout=lf, stderr=subprocess.STDOUT,
             )

@@ -50,7 +50,7 @@ def arm_cwd(task: str, arm: str) -> str | None:
 
 
 def arm_user(arm: str) -> str | None:
-    from harness.run import _arm_module
+    from harness.launch import _arm_module
 
     return getattr(_arm_module(arm), "USER", None)
 

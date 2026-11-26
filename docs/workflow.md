@@ -2,8 +2,8 @@
 
 ```bash
 python3 -m harness.doctor                          # 1 体检
-python3 -m harness.run --suite suites/l5-only.yaml --prepare   # 2 准备
-python3 -m harness.run --suite suites/l5-only.yaml             # 3 执行
+python3 -m harness.launch --suite suites/l5-only.yaml --prepare   # 2 准备
+python3 -m harness.launch --suite suites/l5-only.yaml             # 3 执行
 python3 -m bench.check --suite suites/l5-only.yaml             # 4 校验
 python3 -m bench.score --suite suites/l5-only.yaml             # 5 打分
 python3 -m harness.collect --suite suites/l5-only.yaml         # 6 报告

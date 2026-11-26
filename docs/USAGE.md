@@ -79,7 +79,7 @@ python3 -m harness.multi --quarantine        # 收紧早期未隔离产物树的
 python3 -m harness.baseline --task mla-sparse-l1
 
 # 2. 跑一个臂
-python3 -m harness.run --task mla-sparse-l1 --arm A --budget 1800
+python3 -m harness.launch --task mla-sparse-l1 --arm A --budget 1800
 
 # 3. 校验产物
 python3 -m bench.check.integrity --run runs/arm-A

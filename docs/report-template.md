@@ -82,7 +82,7 @@
 git -C /workspace/toolkit-opbench rev-parse HEAD    # 本报告对应的被测版本
 git -C /workspace/toolkit-skills rev-parse HEAD     # skill 版本（C 臂）
 python3 -m harness.doctor                            # 环境体检快照
-python3 -m harness.run --suite <suite> --arm <a|b|c>
+python3 -m harness.launch --suite <suite> --arm <a|b|c>
 python3 -m harness.collect --runs runs --out reports/
 ```
 

@@ -197,7 +197,7 @@ def build(task_id: str, baselines_dir: str = BASELINES_DIR,
     from bench.data import definition as defn_mod
     from bench.hw import dcu
     from bench.timing import event
-    from harness.run import task_dir
+    from harness.launch import task_dir
 
     td = task_dir(task_id)
     defn = defn_mod.load(os.path.join(td, "definition.json"))

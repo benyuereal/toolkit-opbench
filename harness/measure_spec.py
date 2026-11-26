@@ -60,7 +60,7 @@ def _shapes_from_workload(task_id: str) -> list[dict] | None:
     try:
         from bench.data import definition as defn_mod
         from bench.data import workload as wl_mod
-        from harness.run import task_dir
+        from harness.launch import task_dir
 
         td = task_dir(task_id)
         d = defn_mod.load(os.path.join(td, "definition.json"))

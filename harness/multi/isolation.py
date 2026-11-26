@@ -52,7 +52,7 @@ LEGACY_ROOT = os.path.join(ROOT, "runs")
 
 def arm_user(arm: str) -> str | None:
     """从臂模块读 USER。没有独立用户的臂返回 None（不该出现在多臂对照里）。"""
-    from harness.run import _arm_module
+    from harness.launch import _arm_module
 
     return getattr(_arm_module(arm), "USER", None)
 

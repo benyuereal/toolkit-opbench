@@ -121,7 +121,7 @@ def rank(times: dict[str, float], defn, axes: dict) -> dict[str, PerfScore]:
 def roofline_floor_mixed(defn, axes: dict) -> tuple[float, str, float, float]:
     """按读写比例选带宽口径的地板。
 
-    为什么不能只用 copy 或只用 read：本机 copy(R+W)=1350，read-only=1965。
+    为什么不能只用 copy 或只用 read：本机 copy(R+W)=1350，read-only=1870。
     rmsnorm 是 2读2写（读写各半），用 copy 口径合理；但实测 lightop 跑出
     1362 GB/s 已经超过 1350 —— 说明它的实际读写比或访存效率比 copy 微基准好。
     对这种算子，正确的做法是给一个区间：地板取两者之间，并注明口径。

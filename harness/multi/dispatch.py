@@ -9,7 +9,7 @@
   * 不同 allowedTools → 测出来是工具权限差
   * 不同 prompt → 测出来是提示差
 
-所以命令构造集中在 `harness.run.build_cmd`，这里只负责：
+所以命令构造集中在 `harness.launch.build_cmd`，这里只负责：
   1. 检查这道题这条臂**读不到答案**；
   2. 检查已有臂的预算与本轮一致（`assert_arms_comparable`）；
   3. 把口径块注入 prompt（三臂逐字相同）；
@@ -33,14 +33,22 @@ import time
 from typing import Iterable
 
 
-def dispatch_one(unit, max_usd: float | None = None) -> object:
-    """跑一个单元。异常写进 unit.error，不抛出。"""
-    from harness.run import run_one
+def dispatch_one(unit, max_usd: float | None = None,
+                 card: int | None = None) -> object:
+    """跑一个单元。异常写进 unit.error，不抛出。
+
+    `card` 显式传给 `run_one`，**不写进程级环境变量**：多线程并行时
+    `os.environ` 是共享的，卡 5 的线程刚设成 "5"、卡 4 的线程下一行就
+    改成 "4"，子进程绑哪张卡全看时序，而且不会报错——只会表现为
+    "某张卡上的题没产出"。
+    """
+    from harness.launch import run_one
 
     unit.status = "running"
     started = time.time()
     try:
-        r = run_one(unit.task, unit.arm, unit.budget_s, max_usd=max_usd)
+        r = run_one(unit.task, unit.arm, unit.budget_s, max_usd=max_usd,
+                    device=card)
     except Exception as e:
         unit.status = "failed"
         unit.error = f"{type(e).__name__}: {e}"
@@ -98,22 +106,26 @@ def dispatch_by_card(units: Iterable, cards: list[int],
                 if not queue:
                     return
                 task, items = queue.pop(0)
-            env_backup = os.environ.get("CUDA_VISIBLE_DEVICES")
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(card)
-            os.environ["OPBENCH_DEVICE"] = str(card)
-            try:
-                for u in items:
-                    print(f"  → [卡{card}] {u.task} / {u.arm}", flush=True)
-                    dispatch_one(u, max_usd=max_usd)
+            for u in items:
+                print(f"  → [卡{card}] {u.task} / {u.arm}", flush=True)
+                try:
+                    dispatch_one(u, max_usd=max_usd, card=card)
+                except Exception as e:
+                    # 一道题炸掉不能让整张卡静默退场。
+                    #
+                    # 实测（2026-11-26 10:05）：三题并行，卡 5/6 的线程
+                    # 各抛了一次异常就没了 —— `worker()` 里当时没有 except，
+                    # 线程死掉后 `join()` 照常返回，主进程以为跑完了。
+                    # 结果是三题里只有一题在跑，而日志里一个字都没有。
+                    u.status = f"error:{type(e).__name__}"
+                    print(f"    [卡{card}] {u.arm} {u.task} 失败："
+                          f"{type(e).__name__}: {e}", flush=True)
+                    traceback.print_exc()
+                else:
                     print(f"    [卡{card}] {u.arm} {u.status} "
                           f"wall={u.wall_s}s", flush=True)
-                    with lock:
-                        results.append(u)
-            finally:
-                if env_backup is None:
-                    os.environ.pop("CUDA_VISIBLE_DEVICES", None)
-                else:
-                    os.environ["CUDA_VISIBLE_DEVICES"] = env_backup
+                with lock:
+                    results.append(u)
 
     threads = [threading.Thread(target=worker, args=(c,), name=f"card-{c}")
                for c in cards[:len(by_task)]]

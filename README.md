@@ -124,8 +124,8 @@ toolkit-opbench/
 
 ```bash
 python3 -m harness.doctor                 # 1 体检：GPU / 库版本 / 时钟 / 锁频能力 / L2
-python3 -m harness.run --suite l5-only --arm a --prepare   # 2 展开队列
-python3 -m harness.run --suite l5-only --arm a             # 3 执行（隔离 + 超时 + 收产物）
+python3 -m harness.launch --suite l5-only --arm a --prepare   # 2 展开队列
+python3 -m harness.launch --suite l5-only --arm a             # 3 执行（隔离 + 超时 + 收产物）
 python3 -m bench.check.integrity --run runs/arm-a          # 4 验证（只认产物）
 python3 -m bench.score.ratio --run runs/arm-a              # 5 计分
 python3 -m harness.collect --runs runs --out reports/      # 6 出报告
@@ -180,7 +180,7 @@ python3 -m harness.collect --runs runs --out reports/      # 6 出报告
   报告里必须写明。
 - A 与 B 都用满 `--max-usd 3.0` 被切断（`is_error: true`），但仍交付了完整报告。
   这说明预算上限本身是有效约束，也说明三臂必须用同一组预算——
-  `harness/run.py:assert_arms_comparable` 现在强制这一点。
+  `harness/launch.py:assert_arms_comparable` 现在强制这一点。
 
 ---
 

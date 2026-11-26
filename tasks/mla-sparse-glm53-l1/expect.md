@@ -76,8 +76,8 @@ S*H*DV*2     写 out（DV=256）
 S=128：q=12.58 MB + kv=402.65 MB + ind=1.05 MB + out=4.19 MB = 420.48 MB
 S=2048：q=201.33 MB + kv=6442.45 MB + ind=16.78 MB + out=67.11 MB = 6727.66 MB
 
-分母 `peak_achievable:read = 1965 GB/s` → 带宽地板
-S=128 = 0.214 ms，S=2048 = 3.424 ms。T_sol = max(带宽地板, launch 地板 0.043 ms)，
+分母 `peak_achievable:read = 1870 GB/s` → 带宽地板
+S=128 = 0.225 ms，S=2048 = 3.598 ms。T_sol = max(带宽地板, launch 地板 0.043 ms)，
 所以两个档位都是**带宽地板支配**（S=128 也远高于 launch 地板）。
 
 ## 基线数字怎么读（见 `baselines/mla-sparse-glm53-l1.json`）
