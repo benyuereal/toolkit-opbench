@@ -1,0 +1,21 @@
+# round4：GLM-5.3-Flash 形状 + FP8 KV 的稀疏 MLA
+#
+# 选它的理由（数字来自 baselines/mla-sparse-glm53-fp8-l1.json）：
+#
+#   上限 12.33x     全仓分辨力最强（对照 conv1d 8.20x、bf16 版 sparse MLA 6.18x）
+#   达成率 7.5–8.7% 基线离地板极远，有真空间
+#   cv 0.0004       测量干净，不是噪声
+#
+# 考点：FP8 的「省带宽」是账面收益，能不能兑现取决于 kernel 用不用得上。
+# 本机没有能吃 GLM 形状的 FP8 kernel，基线只能走「整块反量化 + bf16 kernel」
+# 的降级路径 —— 这个降级本身就是要测的。
+#
+# budget = 5400s（90 分钟）。依据：2026-11-26 实测，同一代 model 下
+# mhc-post-l1 这类 L1 题实测要 55 分钟才交出完整报告，30 分钟的预算
+# 会把样本切成 timeout（前几轮 9 个单元全部 timeout，零交付物）。
+# 题面也写的 90 分钟，两处必须一致（run.py 会校验）。
+name: fp8-mla
+description: GLM-5.3-Flash FP8 sparse MLA，三臂对照
+needs_gpu: true
+tasks:
+  - {id: mla-sparse-glm53-fp8-l1, tier: L1, budget: 5400, needs_gpu: true}
