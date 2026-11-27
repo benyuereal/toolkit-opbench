@@ -1,0 +1,65 @@
+{
+  "id": "mla-sparse-glm53-fp8-l1",
+  "kind": "kernel",
+  "family": "attn-mla",
+  "tier": "L1",
+  "precision": ["float8_e4m3fn", "bfloat16"],
+  "axes": {
+    "S": {
+      "type": "var",
+      "domain": {"values": [128, 1024, 1536, 2048]}
+    },
+    "H": {"type": "const", "value": 64},
+    "SKV": {"type": "const", "value": 8192},
+    "TOPK": {"type": "const", "value": 2048},
+    "D": {"type": "const", "value": 768},
+    "KVG": {"type": "const", "value": 1},
+    "DV": {"type": "const", "value": 256},
+    "QTILE": {"type": "const", "value": 6}
+  },
+  "inputs": {
+    "q": {
+      "shape": ["S", "H", "D"],
+      "dtype": "bfloat16"
+    },
+    "kvq": {
+      "shape": ["SKV", "KVG", "D"],
+      "dtype": "float8_e4m3fn"
+    },
+    "kscale": {
+      "shape": ["SKV", "KVG", "QTILE"],
+      "dtype": "float32",
+      "low_scale": 0.01,
+      "high_scale": 0.05
+    },
+    "indices": {
+      "shape": ["S", "KVG", "TOPK"],
+      "dtype": "int32",
+      "low": 0,
+      "high": "SKV",
+      "invalid_ratio": 0.3,
+      "invalid_value": -1
+    }
+  },
+  "outputs": {
+    "out": {
+      "shape": ["S", "H", "DV"],
+      "dtype": "bfloat16"
+    }
+  },
+  "tolerance": {
+    "rtol": 0.05,
+    "atol": 0.01
+  },
+  "reference": "reference.py",
+  "dcu": {
+    "peak_constant": "peak_achievable:read",
+    "roofline_bandwidth": "peak_achievable:read",
+    "baseline_impl": "harness.implementations.sglang_sparse_mla_glm53_fp8",
+    "work": "S*H*D*2 + S*TOPK*D + S*TOPK*QTILE*4 + S*TOPK*4 + S*H*DV*2",
+    "work_unit": "byte",
+    "min_l2_flush_mb": 16,
+    "needs_gpu": true,
+    "extra_args": [0.03608439182435161, 256]
+  }
+}

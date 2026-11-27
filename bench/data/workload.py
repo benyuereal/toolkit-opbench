@@ -181,14 +181,38 @@ def build_inputs(w: Workload, d) -> dict:
 
         if t == "random":
             if dt.is_floating_point:
-                x = torch.randn(shape, dtype=dt, device=dev, generator=gen)
-                # 某些输入在真实模型里**不可能是负的**，拿 randn 造会造出物理上
-                # 不存在的算子：`mhc-post-l1` 的 `comb` 是 Sinkhorn 的输出
-                # （非负、行和≈1），`post` 过 sigmoid（∈[0,2]）。负的混合权重
-                # 会让 4 项互相抵消到 1e-8，正确性判据就变成"谁的舍入误差更小"。
-                # 声明 `positive: true` 取 |randn|，与真实分布同号同量级。
-                if decl.get("positive"):
-                    x = x.abs()
+                # 量化 scale 这类输入必须是**正的小数**，randn 出的量级（±3）
+                # 完全不对：`mla-sparse-glm53-fp8-l1` 的 kscale 实测在 1e-2 量级。
+                # 用 randn*0.03 会让反量化后的 kv 比真实值大两个数量级，
+                # 而正确性判据（相对误差）对这个不敏感——于是题目"能过"，
+                # 但测的是一个不存在的数值范围。声明 low_scale/high_scale
+                # 就在这个区间里均匀取，与真实分布同量级。
+                ls, hs = spec.get("low_scale"), spec.get("high_scale")
+                if ls is not None or hs is not None:
+                    lo_f = float(ls if ls is not None else 0.0)
+                    hi_f = float(hs if hs is not None else 1.0)
+                    if hi_f <= lo_f:
+                        raise ValueError(
+                            f"inputs.{name}: high_scale({hi_f}) 必须大于 "
+                            f"low_scale({lo_f})")
+                    x = torch.rand(shape, dtype=torch.float32, device=dev,
+                                   generator=gen) * (hi_f - lo_f) + lo_f
+                    x = x.to(dt)
+                else:
+                    # fp8 没有 randn 实现（`normal_kernel_cuda not implemented
+                    # for Float8_e4m3fn`），先生成 bf16 再 cast。
+                    # 直接对 fp8 调 randn 是实测踩过的错。
+                    _dt_gen = torch.bfloat16 if dt in (
+                        torch.float8_e4m3fn, torch.float8_e5m2) else dt
+                    x = torch.randn(shape, dtype=_dt_gen, device=dev,
+                                    generator=gen).to(dt)
+                    # 某些输入在真实模型里**不可能是负的**，拿 randn 造会造出
+                    # 物理上不存在的算子：`mhc-post-l1` 的 `comb` 是 Sinkhorn 的
+                    # 输出（非负、行和≈1），`post` 过 sigmoid（∈[0,2]）。负的
+                    # 混合权重会让 4 项互相抵消到 1e-8，正确性判据就变成
+                    # "谁的舍入误差更小"。声明 `positive: true` 取 |randn|。
+                    if decl.get("positive"):
+                        x = x.abs()
             else:
                 lo = _resolve(spec.get("low"), 0)
                 hi = _resolve(spec.get("high"), 8)

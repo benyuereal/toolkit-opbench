@@ -254,3 +254,56 @@ def sglang_sparse_mla_glm53(q, kv, indices, sm_scale: float = 1.0 / 768**0.5,
     q_rope = q[..., d_v:].contiguous()
     out = triton_sparse_mla_fwd(q_nope, q_rope, kv, indices, sm_scale, d_v)
     return out[0]
+
+
+def sglang_sparse_mla_glm53_fp8(q, kvq, kscale, indices,
+                                sm_scale: float = 1.0 / 768**0.5,
+                                d_v: int = 256):
+    """GLM-5.3-Flash 形状 + FP8 KV 的稀疏 MLA 基线。
+
+    ## 这是降级路径，不是最优路径
+
+    本机**没有**能吃 GLM 形状（D=768 / DV=256）的 FP8 稀疏 MLA kernel
+    （2026-11-26 逐个试过）：
+
+      * `flash_mla.flash_mla_sparse_fwd`   → `Invalid d_qk: 768`
+      * `flash_mla.flash_mla_with_kvcache_fp8` → 只支持 d_qk=512/576、d_v=512
+      * `aiter.ops.tilelang.sparse_mla_fwd` → 传 fp8 输入报
+        `ufunc_add_CUDA not implemented for Float8_e4m3fn`
+
+    所以基线只能是生产里真实的降级做法：**先把 FP8 KV 反量化成 bf16，
+    再走已验证正确的 bf16 路径**（sglang 的 DSA Triton kernel）。
+
+    这个降级本身就是本题要测的东西——它多了一趟全量反量化，
+    而反量化只要覆盖被 gather 的那部分就够。**优化空间就在这里**，
+    但题面不会这么说。
+
+    ## 反量化的位置
+
+    整块反量化 `kvq[8192,768]` 只有 6.3 MB，比逐 gather 反量化
+    （S=128 时 201 MB 的 fp8 → 402 MB 的 bf16）省得多。所以基线选择
+    **整块反量化一次**，这是降级路径里最合理的写法，也保证我们给 agent
+    的基线不是故意写坏的。
+
+    ## 计时口径
+
+    反量化在计时窗口内——它就是这条路径的代价。放在窗口外量到的
+    只是 bf16 kernel 的耗时，那和"用 FP8 KV 省带宽"这个目标无关。
+    """
+    import torch
+
+    from sglang.kernels.ops.attention.dsa.triton_sparse_mla import (
+        triton_sparse_mla_fwd,
+    )
+
+    TILE = 128
+    D = kvq.shape[-1]
+    n = D // TILE
+    # 整块反量化：[SKV, 1, D] fp8 × [SKV, 1, n] fp32 → bf16
+    s = kscale[:, :, :n].to(torch.float32).repeat_interleave(TILE, dim=-1)
+    kvd = (kvq.to(torch.float32) * s).to(torch.bfloat16).contiguous()
+
+    q_nope = q[..., :d_v].contiguous()
+    q_rope = q[..., d_v:].contiguous()
+    out = triton_sparse_mla_fwd(q_nope, q_rope, kvd, indices, sm_scale, d_v)
+    return out[0]

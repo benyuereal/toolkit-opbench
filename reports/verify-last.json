@@ -2,72 +2,67 @@
   "task": "norm-act-swiglu-add-rmsnorm-l1",
   "t_b_ms": 0.2990399897098541,
   "shape": {
-    "M": 8192
+    "M": 128
   },
   "rows": [
     {
-      "arm": "A",
-      "impl": "/tmp/opbench-run/arm-A/norm-act-swiglu-add-rmsnorm-l1/attempt-1/scripts/fused_add_rmsnorm_swiglu.py:fused_add_rmsnorm_swiglu",
-      "measured_median_ms": 0.11724025011062622,
-      "measured_min_ms": 0.11584000289440155,
-      "mad_ms": 0.0001200009137392044,
-      "cv": 0.0010235470636233996,
-      "claimed_median_ms": null,
-      "drift_pct": null,
-      "cpu_ms": 0.059042504290118814,
-      "cpu_share": 0.5036026811134159,
+      "arm": "D",
+      "impl": "/tmp/opbench-run/arm-D/norm-act-swiglu-add-rmsnorm-l1/attempt-1/scripts/fused_triton.py:fused_forward",
+      "measured_median_ms": 0.09400000050663948,
+      "measured_min_ms": 0.08560000360012054,
+      "mad_ms": 0.0044000037014484406,
+      "cv": 0.04680854976312108,
+      "claimed_median_ms": 0.187519,
+      "drift_pct": -49.87174605952491,
+      "cpu_ms": 0.05603499448625371,
+      "cpu_share": 0.59611695940678,
       "per_round_ms": [
-        0.11760000139474869,
-        0.11727999895811081,
-        0.11711999773979187,
-        0.11735999956727028,
-        0.11695999652147293,
-        0.11720050126314163
+        0.10847999900579453,
+        0.10911950096487999,
+        0.08959999680519104,
+        0.091839998960495,
+        0.09400000050663948
       ]
     },
     {
-      "arm": "D",
-      "impl": "/tmp/opbench-run/arm-D/norm-act-swiglu-add-rmsnorm-l1/attempt-1/scripts/fused_final.py:forward",
-      "measured_median_ms": 0.12587974965572357,
-      "measured_min_ms": 0.1236800029873848,
-      "mad_ms": 0.00012050196528434753,
-      "cv": 0.0009572783995353973,
-      "claimed_median_ms": null,
-      "drift_pct": null,
-      "cpu_ms": 0.06073000258766115,
-      "cpu_share": 0.4824445770964388,
+      "arm": "A",
+      "impl": "/tmp/opbench-run/arm-A/norm-act-swiglu-add-rmsnorm-l1/attempt-1/scripts/fused_add_rmsnorm_swiglu.py:fused_add_rmsnorm_swiglu",
+      "measured_median_ms": 0.10304000228643417,
+      "measured_min_ms": 0.08816000074148178,
+      "mad_ms": 0.007119994610548019,
+      "cv": 0.06909932504422517,
+      "claimed_median_ms": 0.17912,
+      "drift_pct": -42.47431761588088,
+      "cpu_ms": 0.057920005929190665,
+      "cpu_share": 0.5621118463117132,
       "per_round_ms": [
-        0.12584000080823898,
-        0.12567950040102005,
-        0.12591949850320816,
-        0.12600000202655792,
-        0.12568049877882004,
-        0.12600050121545792
+        0.0928799994289875,
+        0.10807999968528748,
+        0.11015999689698219,
+        0.09232000261545181,
+        0.10304000228643417
       ]
     },
     {
       "arm": "C",
       "impl": "/tmp/opbench-run/arm-C/norm-act-swiglu-add-rmsnorm-l1/attempt-1/skill/Plugins/ops/skills/op-norm-act-swiglu/_common.py:get_runner:fused-hip-v5",
-      "measured_median_ms": 0.12931974977254868,
-      "measured_min_ms": 0.1276800036430359,
-      "mad_ms": 0.00012025237083435059,
-      "cv": 0.0009298840358557293,
-      "claimed_median_ms": null,
-      "drift_pct": null,
-      "cpu_ms": 0.07388999802060425,
-      "cpu_share": 0.5713744277309856,
+      "measured_median_ms": 0.11143999919295311,
+      "measured_min_ms": 0.09216000139713287,
+      "mad_ms": 0.01103999838232994,
+      "cv": 0.0990667485847223,
+      "claimed_median_ms": 0.152159,
+      "drift_pct": -26.760823091008014,
+      "cpu_ms": 0.08281000918941572,
+      "cpu_share": 0.7430905401034156,
       "per_round_ms": [
-        0.12959999591112137,
-        0.12919949740171432,
-        0.1292795017361641,
-        0.12944000214338303,
-        0.12863999605178833,
-        0.12935999780893326
+        0.10040000081062317,
+        0.11143999919295311,
+        0.10967999696731567,
+        0.12520000338554382,
+        0.12855999916791916
       ]
     }
   ],
-  "skipped": {
-    "Z": "没有 attempt 目录"
-  },
-  "iters": 10
+  "skipped": {},
+  "iters": 20
 }

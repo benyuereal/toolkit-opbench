@@ -21,7 +21,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_ARMS = "A,C,D"
-DEFAULT_ENV = "/workspace/tosc.env"
+DEFAULT_ENV = "/workspace/tsoc.env"
 
 
 def _load_state() -> dict | None:

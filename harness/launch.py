@@ -44,10 +44,10 @@ RUNS_DIR = os.path.join(ROOT, "runs")
 BASELINES_DIR = os.path.join(ROOT, "baselines")
 TRACE_PATH = os.path.join(RUNS_DIR, "trace.jsonl")
 CLAUDE = "/opt/opbench-node/bin/claude"
-# 被测 agent 连 API 用的环境文件。默认 tosc.env（qwen3.8-27b，实测有额度）；
+# 被测 agent 连 API 用的环境文件。默认 tsoc.env（qwen3.8-27b，实测有额度）；
 # 三个 opendesign*.env 全 402。三臂必须用同一个，否则测出的是模型差，不是 skill 差。
 # 模型换端点时用 OPBENCH_ENV 覆盖。
-ENV_FILE = os.environ.get("OPBENCH_ENV", "/workspace/tosc.env")
+ENV_FILE = os.environ.get("OPBENCH_ENV", "/workspace/tsoc.env")
 # 某些端点（qwen 的 OpenCode 网关）只接受有限的 reasoning effort 档位，
 # CLI 默认的 high 会被 400 拒掉。用 OPBENCH_EFFORT 传，空则不传该 flag。
 EFFORT = os.environ.get("OPBENCH_EFFORT", "")
@@ -361,7 +361,7 @@ def set_env_file(path: str) -> None:
     **为什么需要这个函数**：`ENV_FILE` 是 import 时从 `os.environ` 打的快照，
     之后再写 `os.environ["OPBENCH_ENV"] = ...` **不会**影响已绑定的模块全局。
     实测踩过：`preflight.check_env(tmpfile)` 就是这么写的，结果它对着临时文件
-    报告「检查通过」，而 `_load_env()` 读的其实是 `/workspace/tosc.env`
+    报告「检查通过」，而 `_load_env()` 读的其实是 `/workspace/tsoc.env`
     （这台机器上根本不存在）——两边看的不是同一个文件，尾斜杠检查形同虚设。
     """
     global ENV_FILE
@@ -373,7 +373,7 @@ def _load_env() -> dict:
     """读 ENV_FILE（KEY=VALUE），返回 dict。走 subprocess 的 env= 传进去，
     不走 shell source，所以不受 export 影响。
 
-    **坑（业主实测）：tosc.env 的 `ANTHROPIC_BASE_URL` 结尾带 `/`。**
+    **坑（业主实测）：tsoc.env 的 `ANTHROPIC_BASE_URL` 结尾带 `/`。**
     原样传进去，Claude Code 会拼成 `...4001//v1/messages` → 404。
     所以 URL 类 key 统一 rstrip("/")。
     """
@@ -843,6 +843,28 @@ def _execute_once(cwd: str, prompt: str, arm: str, budget_s: int,
     """
     env = os.environ.copy()
     env.update(_load_env())
+    # 关掉遥测/自动更新/错误上报。
+    #
+    # ## 为什么必须关（2026-11-26 12:12 实测）
+    #
+    # agent 启动后 5 分钟没有任何输出，进程挂在 epoll_wait。查 socket 发现
+    # 它在连 10.79.104.160:443 —— 这个地址在本机**不可达**（curl 5 秒超时），
+    # 而 api.anthropic.com 是通的。那是遥测端点，连不上就重试，把首字延迟
+    # 从 1 秒拖到几分钟。
+    #
+    # 对照验证：同一份 prompt（4 万 token）用 curl 直连 API 是 10.8 秒；
+    # 走 Claude Code 则几分钟没动静，差的就是这些非必要请求。
+    #
+    # 这不会影响被测模型的行为——只关掉三臂都不需要的旁路请求，
+    # 而且三臂一律关掉，保证公平。
+    env.update({
+        "CLAUDE_CODE_ENABLE_TELEMETRY": "0",
+        "DISABLE_TELEMETRY": "1",
+        "DISABLE_ERROR_REPORTING": "1",
+        "DISABLE_AUTOUPDATER": "1",
+        "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    })
     # 绑卡并行：把卡号写进子进程环境。DCU 上 torch 认 HIP_VISIBLE_DEVICES，
     # 同时设 CUDA_VISIBLE_DEVICES 兼容老代码/第三方库。
     _dev = str(device) if device is not None else os.environ.get("OPBENCH_DEVICE", "")
@@ -858,14 +880,19 @@ def _execute_once(cwd: str, prompt: str, arm: str, budget_s: int,
         #
         # **两条路径都要去尾斜杠**：`_load_env()` 给非 su 路径去掉了 URL 尾斜杠，
         # 但 su 分支是直接在子 shell 里 source env 文件，不走 _load_env()，
-        # 所以这里再 rstrip 一次，否则 tosc.env 的 ...4001/ 会拼成 //v1/... → 404。
+        # 所以这里再 rstrip 一次，否则 tsoc.env 的 ...4001/ 会拼成 //v1/... → 404。
         _pin = ""
         if _dev:
             _pin = (f"export HIP_VISIBLE_DEVICES={_dev} "
                     f"CUDA_VISIBLE_DEVICES={_dev} && ")
+        # 遥测那几个也得在子 shell 里再 export 一次（见上面 env.update 的说明）。
+        _quiet = ("export CLAUDE_CODE_ENABLE_TELEMETRY=0 DISABLE_TELEMETRY=1 "
+                  "DISABLE_ERROR_REPORTING=1 DISABLE_AUTOUPDATER=1 "
+                  "DISABLE_NON_ESSENTIAL_MODEL_CALLS=1 "
+                  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 && ")
         inner = (
             f"cd {_shq(cwd)} && set -a && . {_shq(ENV_FILE)} && set +a && "
-            f"{_pin}"
+            f"{_quiet}{_pin}"
             f"ANTHROPIC_BASE_URL=${{ANTHROPIC_BASE_URL%/}} && "
             f"{_quote_for_shell(cmd)}"
         )

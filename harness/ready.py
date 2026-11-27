@@ -216,6 +216,66 @@ def check_tooling() -> dict:
     return _ok(f"{len(mods)} 个工具入口均可用")
 
 
+def check_arm_writable() -> dict:
+    """每个臂的用户，是否真能往它将来的工作目录里写文件。
+
+    ## 为什么要单独查这一条
+
+    2026-11-26 那天，三题并行跑了 9 分钟，两题的 A 臂零产出。原因不是
+    agent 不干活，是 `scripts/` 被建成 `root:root 755`，它 `write
+    scripts/x.py` 报 Permission denied，然后反复换路径重试到预算耗尽。
+
+    这种失败**不会报错、不会留日志**，表现就是"这个臂没产出"——看起来
+    像模型不行。它能安静地毁掉一整轮对照实验，所以必须在上bench 之前
+    用一个真实的写操作验一遍，而不是猜权限位。
+
+    查法：以该臂用户的身份，往一个临时目录里 touch 一个文件。用 `su`
+    而不是看 `os.access`——后者查的是当前进程（root）的权限，root
+    什么都能写，查了等于没查。
+    """
+    import tempfile
+
+    from harness.launch import _arm_module
+
+    arms = ["A", "C", "D"]
+    broken, skipped = [], []
+    for arm in arms:
+        try:
+            mod = _arm_module(arm)
+        except Exception as e:
+            skipped.append(f"{arm}(取不到臂模块: {e})")
+            continue
+        user = getattr(mod, "USER", None)
+        if not user:
+            continue
+        d = tempfile.mkdtemp(prefix=f"opb-w-{arm}-")
+        try:
+            os.chmod(d, 0o777)
+            probe = os.path.join(d, "scripts")
+            os.makedirs(probe, exist_ok=True)
+            os.chmod(probe, 0o777)
+            target = os.path.join(probe, ".write-probe")
+            r = subprocess.run(
+                ["su", "-", user, "-c", f"touch {target}"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if r.returncode != 0:
+                broken.append(f"{arm}({user}): {(r.stderr or '').strip()[:80]}")
+        finally:
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+
+    if broken:
+        return _bad(
+            f"{len(broken)} 个臂的用户写不进工作目录",
+            "；".join(broken) + "。这类失败不抛异常，只会表现为『该臂没产出』",
+        )
+    msg = f"{len(arms) - len(skipped)} 个臂的用户均可写"
+    if skipped:
+        msg += f"（跳过 {skipped}）"
+    return _ok(msg)
+
+
 def check_gpu() -> dict:
     try:
         from bench.hw import dcu
@@ -244,6 +304,7 @@ CHECKS = {
     "correctness": check_correctness,
     "judge_scoring": check_judge_scoring,
     "tooling": check_tooling,
+    "arm_writable": check_arm_writable,
     "gpu": check_gpu,
 }
 

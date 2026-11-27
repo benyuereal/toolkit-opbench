@@ -58,7 +58,7 @@ def _run_task_on_card(task: str, arms, budget: int, max_usd: float, card: int):
     env = dict(os.environ)
     env["CUDA_VISIBLE_DEVICES"] = str(card)
     env["OPBENCH_DEVICE"] = str(card)
-    env["OPBENCH_ENV"] = os.environ.get("OPBENCH_ENV", "/workspace/tosc.env")
+    env["OPBENCH_ENV"] = os.environ.get("OPBENCH_ENV", "/workspace/tsoc.env")
     env["OPBENCH_EFFORT"] = os.environ.get("OPBENCH_EFFORT", "medium")
     log = f"/tmp/parallel-{task}.log"
     with open(log, "w", encoding="utf-8") as lf:

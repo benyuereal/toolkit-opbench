@@ -1,0 +1,4 @@
+{"axes": {"S": 128}, "inputs": {"q": {"type": "random"}, "kvq": {"type": "random"}, "kscale": {"type": "random"}, "indices": {"type": "random"}}, "uuid": "pub-decode-128", "split": "public"}
+{"axes": {"S": 2048}, "inputs": {"q": {"type": "random"}, "kvq": {"type": "random"}, "kscale": {"type": "random"}, "indices": {"type": "random"}}, "uuid": "pub-prefill-2048", "split": "public"}
+{"axes": {"S": 1024}, "inputs": {"q": {"type": "random"}, "kvq": {"type": "random"}, "kscale": {"type": "random"}, "indices": {"type": "random"}}, "uuid": "hold-1024", "split": "holdout"}
+{"axes": {"S": 1536}, "inputs": {"q": {"type": "random"}, "kvq": {"type": "random"}, "kscale": {"type": "random"}, "indices": {"type": "random"}}, "uuid": "hold-1536", "split": "holdout"}
